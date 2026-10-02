@@ -162,18 +162,20 @@ class MainWindow(QMainWindow):
         qv.addStretch(1)
         left_tabs.addTab(quick_panel, "Quick tasks")
 
-        # Center: lazily populated form stack + empty-state hint
+        # Center: lazily populated form stack. Empty state is a compact banner
+        # so the console (CLI) owns the space until a command form is opened.
         self.form_stack = QStackedWidget()
-        empty = QLabel("Select a command on the left, or use the console "
-                       "below.\n\nEvery client command has a form here.")
-        empty.setAlignment(Qt.AlignCenter)
-        empty.setObjectName("Subtitle")
+        empty = QLabel("No command selected — pick one from Commands for a "
+                       "fill-in form, or just type in the console below.")
+        empty.setWordWrap(True)
+        empty.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        empty.setObjectName("OptHelp")
         self._empty_index = self.form_stack.addWidget(empty)
 
         form_wrap = QFrame()
         form_wrap.setObjectName("Panel")
         fw = QVBoxLayout(form_wrap)
-        fw.setContentsMargins(16, 16, 16, 16)
+        fw.setContentsMargins(16, 12, 16, 12)
         fw.addWidget(self.form_stack)
 
         # Console
@@ -183,9 +185,15 @@ class MainWindow(QMainWindow):
         right_split = QSplitter(Qt.Vertical)
         right_split.addWidget(form_wrap)
         right_split.addWidget(self.console)
-        right_split.setStretchFactor(0, 3)
-        right_split.setStretchFactor(1, 2)
-        right_split.setSizes([520, 280])
+        right_split.setCollapsible(0, False)
+        right_split.setCollapsible(1, False)
+        right_split.setStretchFactor(0, 0)
+        right_split.setStretchFactor(1, 1)
+        # Banner stays small; console gets the room. Opening a form grows the
+        # top pane once (see _show_form), then the user's sizing is respected.
+        right_split.setSizes([70, 760])
+        self._center_split = right_split
+        self._center_autosized = False
 
         main_split = QSplitter(Qt.Horizontal)
         main_split.addWidget(left_tabs)
@@ -292,6 +300,14 @@ class MainWindow(QMainWindow):
             self._forms[name] = form
             self.form_stack.addWidget(form)
         self.form_stack.setCurrentWidget(form)
+        # First form opened: give the top pane real room. After that, leave
+        # whatever split the user has chosen alone.
+        if not self._center_autosized:
+            self._center_autosized = True
+            self._center_split.setSizes([480, 360])
+        elif self._center_split.sizes()[0] < 160:
+            # Pane was dragged (near) shut; reopen enough to see the form.
+            self._center_split.setSizes([420, 400])
 
     def _load_example(self, line: str):
         self.console.entry.setText(line)
