@@ -81,8 +81,15 @@ def dll_dirs(exe: str) -> list:
         return []
     dirs = [os.path.dirname(os.path.abspath(exe))]
     for root in _proxspace_roots(exe):
-        for sub in ("ucrt64", "mingw64"):
-            dirs.append(os.path.join(root, "msys2", sub, "bin"))
+        # ProxSpace builds the client in MINGW64. Never mix in ucrt64 DLLs
+        # (e.g. from an ARM toolchain installed there): libstdc++ / libgcc
+        # from the other runtime make the client die with "entry point not
+        # found" before printing anything.
+        for sub in ("mingw64", "ucrt64"):
+            d = os.path.join(root, "msys2", sub, "bin")
+            if os.path.isdir(d):
+                dirs.append(d)
+                break
         dirs.append(os.path.join(root, "msys2", "usr", "bin"))
     return [d for d in dirs if os.path.isdir(d)]
 
@@ -93,7 +100,17 @@ def client_env(exe: str, base: dict = None) -> dict:
     extra = dll_dirs(exe)
     if extra:
         env["PATH"] = os.pathsep.join(extra + [env.get("PATH", "")])
+    # The client keeps prefs/logs in $HOME/.proxmark3 and falls back to its
+    # working directory without $HOME, which Windows does not set (outside
+    # ProxSpace). A GUI launched from a shortcut may sit in System32.
+    if not env.get("HOME"):
+        env["HOME"] = user_home().replace("\\", "/")
     return env
+
+
+def user_home() -> str:
+    """Folder to run the client in, so its default save paths are sensible."""
+    return os.path.expanduser("~")
 
 
 def list_ports() -> list:

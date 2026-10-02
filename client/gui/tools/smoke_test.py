@@ -117,6 +117,8 @@ def main():
     check(s.device_state() == "offline", "device state offline (%s)" % s.device_state())
     check(not any("__pm3gui" in ln for ln in lines), "no internal markers in output")
     check(any("hello from smoke test" in ln for ln in lines), "command output captured")
+    check(not any("Could not create user directory" in ln for ln in lines),
+          "client has a writable user directory")
 
     check(s.send("rem " + "x" * 400) is False, "over-long command rejected")
 

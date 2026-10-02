@@ -82,6 +82,7 @@ class Pm3Session(QObject):
         self._queue: list = []
         self._seq = 0
         self._last_state = "offline"
+        self._no_comms = False   # client reported it can't talk to the device
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -94,6 +95,8 @@ class Pm3Session(QObject):
         for k, v in osutil.client_env(self._exe).items():
             env.insert(k, v)
         self._proc.setProcessEnvironment(env)
+        self._proc.setWorkingDirectory(osutil.user_home())
+        self._no_comms = False
         self._proc.start(self._exe, args)
 
     def stop(self):
@@ -197,6 +200,8 @@ class Pm3Session(QObject):
             self.line.emit(echo.group("cmd"), "echo")
             return
 
+        if "cannot communicate with the Proxmark3" in ln:
+            self._no_comms = True
         if self._pending is not None:
             self._captured.append(ln)
         self.line.emit(ln, "out")
@@ -210,6 +215,12 @@ class Pm3Session(QObject):
         self._queue.clear()
         if was_busy:
             self.busy.emit(False)
+        if self._no_comms:
+            self._no_comms = False
+            self.error.emit("The client opened the port but the device did not "
+                            "answer. Usually the firmware on the Proxmark3 does "
+                            "not match this client: flash it from this checkout "
+                            "(pm3-flash-all), then reconnect.")
         self.stopped.emit(int(code))
 
     def _on_error(self, err):

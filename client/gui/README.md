@@ -79,6 +79,15 @@ folder. The GUI adds them to the client's PATH automatically when the client
 is inside a ProxSpace folder or ProxSpace is at `C:\ProxSpace`. If you see
 "Could not start", point **Client** at the right `proxmark3.exe`.
 
+If the port opens but the console shows `unknown command:: 0x61334d50` and
+`cannot communicate with the Proxmark3`, the device is running older firmware
+that does not speak this client's protocol. Build and flash the firmware from
+this checkout (`make -j` then `./pm3-flash-all` in ProxSpace), then reconnect.
+Current MSYS2 only ships the ARM compiler for `ucrt64`
+(`mingw-w64-ucrt-x86_64-arm-none-eabi-toolchain`); the GUI deliberately does
+not put `ucrt64\bin` on the client's PATH, since its DLLs break the
+`mingw64`-built client.
+
 ## How it works
 
 `pm3gui` runs the client in its normal interactive loop and pipes commands to
