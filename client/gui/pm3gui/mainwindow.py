@@ -20,11 +20,6 @@
 
 from __future__ import annotations
 
-import glob
-import os
-import shutil
-import sys
-
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -34,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from .commands import Command, CommandSet
+from . import osutil
 from .session import Pm3Session
 from . import theme
 from .widgets.console import Console
@@ -55,36 +51,6 @@ QUICK_TASKS = [
     ("Read iCLASS (HF)", "hf iclass reader"),
     ("List known LF tags", "lf search -1"),
 ]
-
-
-def guess_ports() -> list:
-    pats = ["/dev/ttyACM*", "/dev/ttyUSB*", "/dev/tty.usbmodem*",
-            "/dev/cu.usbmodem*", "/dev/tty.usbserial*"]
-    found = []
-    for p in pats:
-        found += sorted(glob.glob(p))
-    if sys.platform.startswith("win"):
-        found += ["COM%d" % i for i in range(3, 12)]
-    return found
-
-
-def guess_client() -> str:
-    # Prefer a sibling build of this very checkout, then PATH.
-    here = os.path.dirname(os.path.abspath(__file__))
-    local = [
-        os.path.join(here, "..", "..", "proxmark3"),           # client/proxmark3
-        os.path.join(here, "..", "..", "..", "client", "proxmark3"),
-        os.path.join(here, "..", "..", "..", "pm3"),
-    ]
-    for c in local:
-        c = os.path.normpath(c)
-        if os.path.isfile(c) and os.access(c, os.X_OK):
-            return c
-    for name in ("proxmark3", "pm3"):
-        found = shutil.which(name)
-        if found:
-            return found
-    return "proxmark3"
 
 
 class MainWindow(QMainWindow):
@@ -115,17 +81,19 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(12, 10, 12, 10)
         lay.setSpacing(8)
 
-        self.exe_edit = QLineEdit(client_exe or guess_client())
+        self.exe_edit = QLineEdit(client_exe or osutil.find_client())
         self.exe_edit.setMinimumWidth(240)
         browse = QPushButton("Browse")
         browse.clicked.connect(self._browse_exe)
 
         self.port_combo = QComboBox()
         self.port_combo.setEditable(True)
-        self.port_combo.setMinimumWidth(200)
-        for p in guess_ports():
-            self.port_combo.addItem(p)
+        self.port_combo.setMinimumWidth(220)
         self.port_combo.lineEdit().setPlaceholderText("serial port (blank = offline)")
+        self._fill_ports()
+        rescan = QPushButton("Rescan")
+        rescan.setToolTip("Look for connected serial ports again")
+        rescan.clicked.connect(self._fill_ports)
 
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.setObjectName("Primary")
@@ -144,6 +112,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(browse)
         lay.addWidget(QLabel("Port"))
         lay.addWidget(self.port_combo, 1)
+        lay.addWidget(rescan)
         lay.addWidget(self.stop_btn)
         lay.addWidget(self.connect_btn)
         self._conn_bar = bar
@@ -335,20 +304,43 @@ class MainWindow(QMainWindow):
         if exe and not self.exe_edit.text().strip():
             self.exe_edit.setText(exe)
         port = self._settings.value("port", "")
-        if port:
-            if self.port_combo.findText(port) < 0:
-                self.port_combo.insertItem(0, port)
-            self.port_combo.setCurrentText(port)
+        # A detected Proxmark3 beats the remembered port.
+        if port and not self._pm3_detected:
+            idx = self.port_combo.findData(port)
+            if idx >= 0:
+                self.port_combo.setCurrentIndex(idx)
+            else:
+                self.port_combo.setEditText(port)
         geo = self._settings.value("geometry")
         if geo is not None:
             self.restoreGeometry(geo)
 
     def _save_settings(self):
         self._settings.setValue("client", self.exe_edit.text().strip())
-        self._settings.setValue("port", self.port_combo.currentText().strip())
+        self._settings.setValue("port", self._current_port())
         self._settings.setValue("geometry", self.saveGeometry())
 
     # -- connection ---------------------------------------------------------
+
+    def _fill_ports(self):
+        typed = self._current_port() if self.port_combo.count() else ""
+        self.port_combo.clear()
+        self._pm3_detected = False
+        for port, label, is_pm3 in osutil.list_ports():
+            self.port_combo.addItem(label, port)
+            self._pm3_detected |= is_pm3
+        if self._pm3_detected:
+            self.port_combo.setCurrentIndex(0)
+        else:
+            self.port_combo.setEditText(typed)
+
+    def _current_port(self) -> str:
+        """Port the client expects, even when the combo shows a label."""
+        text = self.port_combo.currentText().strip()
+        idx = self.port_combo.findText(text)
+        if idx >= 0 and self.port_combo.itemData(idx):
+            return self.port_combo.itemData(idx)
+        return text
 
     def _browse_exe(self):
         path, _ = QFileDialog.getOpenFileName(self, "Locate proxmark3 client")
@@ -363,7 +355,7 @@ class MainWindow(QMainWindow):
         if not exe:
             QMessageBox.warning(self, "No client", "Set the proxmark3 client path.")
             return
-        port = self.port_combo.currentText().strip()
+        port = self._current_port()
         self._save_settings()
         self.session = Pm3Session(exe, port)
         self.session.line.connect(self._on_line)

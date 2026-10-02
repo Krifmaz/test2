@@ -60,6 +60,25 @@ python3 -m pm3gui --help              # all options
 - Press **Connect**. The status dot shows the device state reported by the
   client (`usb` / `fpc` / `offline`).
 
+## Windows
+
+1. Build the client with ProxSpace, following
+   `doc/md/Installation_Instructions/Windows-Installation-Instructions.md`.
+   You end up with `C:\ProxSpace\pm3\client\proxmark3.exe`. Build from this
+   branch so the Stop button works (see Notes below).
+2. Install Python 3 from https://www.python.org/downloads/ and tick
+   **Add python.exe to PATH** during setup.
+3. Double-click `client\gui\proxmark3-gui.cmd`. The first run installs
+   PySide6. After that, `proxmark3-gui.pyw` starts the GUI without a console
+   window.
+4. Plug in the Proxmark3. It shows up in the Port list as `COMx — Proxmark3`
+   and is selected automatically (use **Rescan** if you plug it in later).
+
+The ProxSpace-built `proxmark3.exe` needs DLLs from ProxSpace's `msys2`
+folder. The GUI adds them to the client's PATH automatically when the client
+is inside a ProxSpace folder or ProxSpace is at `C:\ProxSpace`. If you see
+"Could not start", point **Client** at the right `proxmark3.exe`.
+
 ## How it works
 
 `pm3gui` runs the client in its normal interactive loop and pipes commands to
@@ -77,6 +96,9 @@ are required; it drives the stock binary.
 | `pm3gui/widgets/console.py` | Output pane + command entry with history. |
 | `pm3gui/mainwindow.py` | Window: connection bar, command tree, forms, console. |
 | `pm3gui/theme.py` | OLED-black + pastel ROYGBIV stylesheet and colour map. |
+| `pm3gui/osutil.py` | Finds the client, its Windows DLL folders, and serial ports (Proxmark3 by USB ID). |
+| `tools/smoke_test.py` | Headless end-to-end test against a real built client (also run in Windows CI). |
+| `proxmark3-gui.cmd` / `.pyw` | Windows launchers. |
 | `pm3gui/group_descriptions.json` | Group help ("hf 14a" → "ISO14443A RFIDs"), generated. |
 | `tools/gen_group_descriptions.py` | Regenerates the above from the client's `command_t` tables. |
 
@@ -98,7 +120,7 @@ renaming a command group, run `python3 tools/gen_group_descriptions.py`.
   small `client/src/util.c` change so the Windows client also accepts the Enter
   from a pipe. Without that patch, use Disconnect (force-kill) to stop on
   Windows.
-- Tested on Linux against a real built client (offline mode). The
-  subprocess/serial paths use Qt's `QProcess`, which is cross-platform; the
-  Windows `kbd_enter_pressed` change was compile-checked with mingw but not yet
-  run on Windows/macOS hardware.
+- Tested on Linux against a real built client (offline mode) with
+  `tools/smoke_test.py`, including Stop. The same test runs in the Windows CI
+  job (`.github/workflows/windows.yml`) against the ProxSpace-built client.
+  Not yet tested with a physical Proxmark3 or on macOS.

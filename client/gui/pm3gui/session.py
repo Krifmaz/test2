@@ -25,6 +25,8 @@ import re
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 
+from . import osutil
+
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][AB012]|[\x01\x02\x07]")
 
@@ -88,7 +90,10 @@ class Pm3Session(QObject):
         args = [self._port] if self._port else []
         # -f flushes after every print so output streams live.
         args += ["-f"] + self._extra
-        self._proc.setProcessEnvironment(QProcessEnvironment.systemEnvironment())
+        env = QProcessEnvironment()
+        for k, v in osutil.client_env(self._exe).items():
+            env.insert(k, v)
+        self._proc.setProcessEnvironment(env)
         self._proc.start(self._exe, args)
 
     def stop(self):
@@ -207,5 +212,12 @@ class Pm3Session(QObject):
             self.busy.emit(False)
         self.stopped.emit(int(code))
 
-    def _on_error(self, _err):
-        self.error.emit(self._proc.errorString())
+    def _on_error(self, err):
+        msg = self._proc.errorString()
+        if err == QProcess.FailedToStart:
+            msg = "Could not start %s: %s" % (self._exe, msg)
+            if osutil.IS_WINDOWS:
+                msg += (". On Windows, check the path points at proxmark3.exe "
+                        "and that ProxSpace's msys2 folder is next to it or at "
+                        "C:\\ProxSpace (its DLLs are needed).")
+        self.error.emit(msg)

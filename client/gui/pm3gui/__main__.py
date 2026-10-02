@@ -22,6 +22,16 @@ import argparse
 import sys
 
 
+def _fatal(msg: str) -> int:
+    # pythonw (the .pyw launcher) has no stderr; fall back to a dialog box.
+    if sys.stderr is not None:
+        sys.stderr.write(msg + "\n")
+    elif sys.platform.startswith("win"):
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, msg, "Proxmark3 Studio", 0x10)
+    return 2
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="pm3gui",
@@ -37,10 +47,9 @@ def main(argv=None) -> int:
     try:
         from PySide6.QtWidgets import QApplication
     except ImportError:
-        sys.stderr.write(
-            "PySide6 is required. Install it with:\n"
-            "    pip install -r client/gui/requirements.txt\n")
-        return 2
+        return _fatal("PySide6 is required. Install it with:\n"
+                      "    pip install -r client/gui/requirements.txt\n"
+                      "(on Windows, proxmark3-gui.cmd does this for you)")
 
     from .commands import CommandSet
     from .mainwindow import MainWindow
@@ -49,8 +58,7 @@ def main(argv=None) -> int:
     try:
         cmdset = CommandSet.load(args.commands or None)
     except FileNotFoundError as exc:
-        sys.stderr.write(str(exc) + "\n")
-        return 2
+        return _fatal(str(exc))
 
     app = QApplication(sys.argv[:1])
     app.setApplicationName("Proxmark3 Studio")

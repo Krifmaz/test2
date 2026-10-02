@@ -133,6 +133,28 @@ jobs:
       - name: Test
         run: make check
 
+      # Native Python: PySide6 has no wheels for the MSYS2 Python on PATH.
+      - name: Set up Python for GUI test
+        id: guipy
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # --strip-path drops MSYS2 from PATH so the GUI must find the DLLs itself.
+      - name: GUI smoke test
+        run: |
+          & "${{ steps.guipy.outputs.python-path }}" -m pip install -r client/gui/requirements.txt
+          & "${{ steps.guipy.outputs.python-path }}" client/gui/tools/smoke_test.py --client client/proxmark3.exe --strip-path --shot pm3gui-windows.png
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload GUI screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm3gui-windows-screenshot
+          path: pm3gui-windows.png
+          if-no-files-found: ignore
+
       - name: make clean
         run: make clean
 

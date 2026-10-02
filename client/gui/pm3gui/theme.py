@@ -88,8 +88,9 @@ QPushButton#Primary {{ background: {ACCENT}; color: {ACCENT_INK}; border: 0; }}
 QPushButton#Primary:hover {{ background: {GREEN}; }}
 QPushButton#Danger {{ border: 1px solid {DANGER}; color: {DANGER}; background: {BG2}; }}
 QPushButton#Danger:hover {{ background: {DANGER}; color: {ACCENT_INK}; }}
+QPushButton#Danger:disabled {{ border: 1px solid {BORDER}; color: {MUTED}; background: {BG1}; }}
 QPushButton#Example {{ text-align: left; font-weight: 400; color: {ACCENT};
-    font-family: "JetBrains Mono", "Cascadia Code", "DejaVu Sans Mono", "Menlo", monospace;
+    font-family: "JetBrains Mono", "Cascadia Code", "Consolas", "DejaVu Sans Mono", "Menlo", monospace;
     font-size: 12px; padding: 5px 10px; }}
 QPushButton#Example:hover {{ color: {ACCENT_INK}; background: {ACCENT}; border-color: {ACCENT}; }}
 QPushButton#Quick {{ text-align: left; }}
@@ -110,7 +111,7 @@ QHeaderView::section {{ background: {BG1}; color: {MUTED}; border: 0;
 QPlainTextEdit#Console {{
     background: {CONSOLE_BG}; color: {CONSOLE_FG}; border: 1px solid {BORDER};
     border-radius: 12px;
-    font-family: "JetBrains Mono", "Cascadia Code", "DejaVu Sans Mono", "Menlo", monospace;
+    font-family: "JetBrains Mono", "Cascadia Code", "Consolas", "DejaVu Sans Mono", "Menlo", monospace;
     font-size: 12.5px;
 }}
 
