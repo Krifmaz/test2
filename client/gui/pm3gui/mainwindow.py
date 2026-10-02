@@ -25,7 +25,8 @@ import os
 import shutil
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QMainWindow, QMessageBox, QPushButton, QSplitter, QStackedWidget,
@@ -93,6 +94,7 @@ class MainWindow(QMainWindow):
         self.cmdset = cmdset
         self.session = None
         self._forms: dict = {}        # command name -> CommandForm (lazy)
+        self._settings = QSettings("Proxmark3", "Studio")
 
         self.setWindowTitle("Proxmark3 Studio — Iceman GUI")
         self.resize(1400, 880)
@@ -101,6 +103,7 @@ class MainWindow(QMainWindow):
         self._build_body()
         self._build_statusbar()
         self._populate_tree()
+        self._restore_settings()
         self._set_connected(False)
 
     # -- layout -------------------------------------------------------------
@@ -128,11 +131,20 @@ class MainWindow(QMainWindow):
         self.connect_btn.setObjectName("Primary")
         self.connect_btn.clicked.connect(self._toggle_connection)
 
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setObjectName("Danger")
+        self.stop_btn.setToolTip(
+            "Stop the running command (sends Enter, like the CLI).\n"
+            "If it will not stop, use Disconnect to force-kill the client.")
+        self.stop_btn.clicked.connect(self._stop_command)
+        self.stop_btn.setEnabled(False)
+
         lay.addWidget(QLabel("Client"))
         lay.addWidget(self.exe_edit, 1)
         lay.addWidget(browse)
         lay.addWidget(QLabel("Port"))
         lay.addWidget(self.port_combo, 1)
+        lay.addWidget(self.stop_btn)
         lay.addWidget(self.connect_btn)
         self._conn_bar = bar
 
@@ -145,7 +157,9 @@ class MainWindow(QMainWindow):
         tv.setContentsMargins(8, 8, 8, 8)
         tv.setSpacing(8)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search all 935 commands…")
+        self.search.setPlaceholderText(
+            "Search %d commands by name or description…"
+            % len(self.cmdset.commands))
         self.search.textChanged.connect(self._filter_tree)
         tv.addWidget(self.search)
         self.tree = QTreeWidget()
@@ -168,6 +182,10 @@ class MainWindow(QMainWindow):
         qv.addWidget(hint)
         for label, cmd in QUICK_TASKS:
             b = QPushButton(label)
+            b.setObjectName("Quick")
+            group = cmd.split(" ", 1)[0]
+            b.setStyleSheet("QPushButton { border-left: 3px solid %s; }"
+                            % theme.group_color(group))
             b.clicked.connect(lambda _=False, c=cmd: self._run_command(c))
             qv.addWidget(b)
         qv.addStretch(1)
@@ -204,6 +222,7 @@ class MainWindow(QMainWindow):
         main_split.setStretchFactor(0, 0)
         main_split.setStretchFactor(1, 1)
         main_split.setSizes([480, 900])
+        self._main_split = main_split
 
         central = QWidget()
         cv = QVBoxLayout(central)
@@ -214,9 +233,16 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     def _build_statusbar(self):
+        self.dot = QLabel("●")
+        self.dot.setObjectName("Dot")
         self.state_label = QLabel("Disconnected")
+        self.statusBar().addPermanentWidget(self.dot)
         self.statusBar().addPermanentWidget(self.state_label)
+        self._set_dot(theme.MUTED)
         self.statusBar().showMessage("Ready")
+
+    def _set_dot(self, color: str):
+        self.dot.setStyleSheet("color: %s;" % color)
 
     # -- command tree -------------------------------------------------------
 
@@ -224,14 +250,16 @@ class MainWindow(QMainWindow):
         self.tree.clear()
         tree = self.cmdset.tree()
 
-        def add(parent, node, prefix):
+        def add(parent, node, prefix, top_group):
             for key in sorted(node.keys()):
                 val = node[key]
                 path = (prefix + " " + key).strip()
+                group = top_group or key
                 desc = self.cmdset.describe(path)
                 item = QTreeWidgetItem([key, desc])
                 item.setToolTip(0, path)
                 item.setToolTip(1, desc)
+                item.setForeground(0, QColor(theme.group_color(group)))
                 if isinstance(val, Command):
                     item.setData(0, Qt.UserRole, val.name)
                     _attach(parent, item)
@@ -241,7 +269,7 @@ class MainWindow(QMainWindow):
                     font.setBold(True)
                     item.setFont(0, font)
                     _attach(parent, item)
-                    add(item, val, path)
+                    add(item, val, path, group)
 
         def _attach(parent, item):
             if parent is None:
@@ -249,7 +277,7 @@ class MainWindow(QMainWindow):
             else:
                 parent.addChild(item)
 
-        add(None, tree, "")
+        add(None, tree, "", "")
 
     def _filter_tree(self, text: str):
         text = text.strip().lower()
@@ -297,7 +325,28 @@ class MainWindow(QMainWindow):
     def _load_example(self, line: str):
         self.console.entry.setText(line)
         self.console.entry.setFocus()
-        self.statusBar().showMessage("Example loaded \u2014 edit if needed, then press Enter", 5000)
+        self.statusBar().showMessage(
+            "Example loaded — edit if needed, then press Enter", 5000)
+
+    # -- settings -----------------------------------------------------------
+
+    def _restore_settings(self):
+        exe = self._settings.value("client", "")
+        if exe and not self.exe_edit.text().strip():
+            self.exe_edit.setText(exe)
+        port = self._settings.value("port", "")
+        if port:
+            if self.port_combo.findText(port) < 0:
+                self.port_combo.insertItem(0, port)
+            self.port_combo.setCurrentText(port)
+        geo = self._settings.value("geometry")
+        if geo is not None:
+            self.restoreGeometry(geo)
+
+    def _save_settings(self):
+        self._settings.setValue("client", self.exe_edit.text().strip())
+        self._settings.setValue("port", self.port_combo.currentText().strip())
+        self._settings.setValue("geometry", self.saveGeometry())
 
     # -- connection ---------------------------------------------------------
 
@@ -306,38 +355,67 @@ class MainWindow(QMainWindow):
         if path:
             self.exe_edit.setText(path)
 
-    def _toggle_connection(self):
+    def start_connection(self):
+        """Public: connect now (used by --port auto-connect and the button)."""
         if self.session and self.session.is_running():
-            self.session.stop()
             return
         exe = self.exe_edit.text().strip()
         if not exe:
             QMessageBox.warning(self, "No client", "Set the proxmark3 client path.")
             return
         port = self.port_combo.currentText().strip()
+        self._save_settings()
         self.session = Pm3Session(exe, port)
-        self.session.output.connect(self.console.append)
+        self.session.line.connect(self._on_line)
+        self.session.state.connect(self._on_state)
+        self.session.busy.connect(self._on_busy)
         self.session.started.connect(lambda: self._set_connected(True))
         self.session.stopped.connect(self._on_session_stopped)
-        self.session.prompt.connect(self._on_prompt)
         self.session.error.connect(self._on_session_error)
-        self.console.append_line(
-            "\n[*] starting %s %s\n" % (exe, port or "(offline)"))
+        self.console.append_system(
+            "[*] starting %s %s" % (exe, port or "(offline mode)"))
         self.session.start()
+
+    def _toggle_connection(self):
+        if self.session and self.session.is_running():
+            self.session.stop()
+        else:
+            self.start_connection()
+
+    def _stop_command(self):
+        if self.session and self.session.is_busy():
+            self.session.interrupt()
+            self.console.append_system("[*] stop requested…")
+
+    def _on_line(self, text: str, kind: str):
+        if kind == "echo":
+            self.console.append_line(text, "echo")
+        else:
+            self.console.append_output(text)
+
+    def _on_busy(self, busy: bool):
+        self.stop_btn.setEnabled(busy)
+        if busy:
+            self.statusBar().showMessage("Running…")
+        else:
+            self.statusBar().showMessage("Ready", 2000)
 
     def _on_session_stopped(self, code):
         self._set_connected(False)
-        self.console.append_line("\n[*] client exited (code %d)\n" % code)
+        self.console.append_system("[*] client exited (code %d)" % code)
 
     def _on_session_error(self, msg):
         self.statusBar().showMessage("Client error: " + msg, 8000)
-        self.console.append_line("[!] " + msg)
+        self.console.append_line("[!] " + msg, "error")
 
-    def _on_prompt(self, state: str):
+    def _on_state(self, state: str):
         online = state.lower() not in ("offline", "")
-        pretty = state.upper() if state else "OFFLINE"
-        self.state_label.setText(("Device: " + pretty) if online
-                                 else "Offline (no device)")
+        if online:
+            self.state_label.setText("Device: " + state.upper())
+            self._set_dot(theme.GREEN)
+        else:
+            self.state_label.setText("Offline (no device)")
+            self._set_dot(theme.YELLOW)
 
     def _set_connected(self, connected: bool):
         self.connect_btn.setText("Disconnect" if connected else "Connect")
@@ -345,9 +423,12 @@ class MainWindow(QMainWindow):
         self.port_combo.setEnabled(not connected)
         if connected:
             self.state_label.setText("Connected")
+            self._set_dot(theme.GREEN)
             self.statusBar().showMessage("Client running", 4000)
         else:
             self.state_label.setText("Disconnected")
+            self._set_dot(theme.MUTED)
+            self.stop_btn.setEnabled(False)
 
     # -- running ------------------------------------------------------------
 
@@ -360,10 +441,10 @@ class MainWindow(QMainWindow):
                 self, "Not connected",
                 "Connect to the client first (a blank port starts it offline).")
             return
-        self.console.echo_command(cmd)
         self.session.send(cmd)
 
     def closeEvent(self, event):
+        self._save_settings()
         if self.session and self.session.is_running():
             self.session.stop()
         super().closeEvent(event)

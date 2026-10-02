@@ -6,9 +6,9 @@ same `proxmark3` binary you already build, keeps a live session, and gives you
 buttons and forms instead of the terminal.
 
 Because the UI is generated from `doc/commands.json`, **every** client command
-(935 at time of writing) gets its own form automatically, and the GUI stays in
-sync with whatever firmware/client this checkout ships. Nothing is hand-coded
-per command, so nothing is missed.
+gets its own form automatically (800+ commands, however many this checkout
+ships), and it stays in sync with the client. Nothing is hand-coded per
+command, so nothing is missed.
 
 ## What you get
 
@@ -21,10 +21,17 @@ per command, so nothing is missed.
   to load it into the console). Search matches descriptions too, e.g. "magic".
 - **Quick tasks** — one-click shortcuts for the common jobs (device version,
   antenna tuning, LF/HF auto-detect, MIFARE autopwn, read HID/EM410x/14a/iCLASS).
-- **Live console** — the real client output, plus a command entry with history
-  (↑/↓) so anything not covered by a form is one line away.
+- **Live console** — the real client output, colour-coded by the client's own
+  `[+]`/`[-]`/`[!]`/`[=]` tags, plus a command entry with history (↑/↓).
+- **Stop button** — stops a long-running command (sniff, simulate, brute-force)
+  the same way pressing Enter does in the CLI. If it won't stop, Disconnect
+  force-kills the client.
 - **Offline mode** — leave the port blank to start the client offline for
   demod, file, and analysis commands with no hardware attached.
+- **Remembers** your client path, last port, and window size; pass `--port` to
+  auto-connect on launch.
+- **OLED-black theme** with a pastel ROYGBIV accent set; each command group has
+  its own colour in the tree and quick tasks.
 
 ## Requirements
 
@@ -47,17 +54,19 @@ python3 -m pm3gui --help              # all options
 ```
 
 - **Client** — path to the `proxmark3` binary (auto-detected from this
-  checkout or `$PATH`; use `…` to browse).
+  checkout or `$PATH`; use **Browse**).
 - **Port** — the serial device (e.g. `/dev/ttyACM0`, `/dev/tty.usbmodemXXX`,
   `COM4`). Leave blank to run offline. Likely ports are pre-filled.
-- Press **Connect**. The status bar shows the device state reported by the
-  client's prompt (`usb` / `fpc` / `offline`).
+- Press **Connect**. The status dot shows the device state reported by the
+  client (`usb` / `fpc` / `offline`).
 
 ## How it works
 
 `pm3gui` runs the client in its normal interactive loop and pipes commands to
-its stdin one at a time, using the client's own `[...] pm3 -->` prompt as the
-end-of-command marker to split and label output. No firmware or client changes
+its stdin one at a time. The client echoes `[dev|script] pm3 --> <cmd>` before
+each command, so pm3gui appends a short `rem` marker to every command line and
+watches for that marker's echo to know when the command has finished — this is
+how it splits and labels each command's output. No firmware or client changes
 are required; it drives the stock binary.
 
 | File | Role |
@@ -67,7 +76,7 @@ are required; it drives the stock binary.
 | `pm3gui/widgets/formbuilder.py` | Generates a form for one command. |
 | `pm3gui/widgets/console.py` | Output pane + command entry with history. |
 | `pm3gui/mainwindow.py` | Window: connection bar, command tree, forms, console. |
-| `pm3gui/theme.py` | Dark stylesheet. |
+| `pm3gui/theme.py` | OLED-black + pastel ROYGBIV stylesheet and colour map. |
 | `pm3gui/group_descriptions.json` | Group help ("hf 14a" → "ISO14443A RFIDs"), generated. |
 | `tools/gen_group_descriptions.py` | Regenerates the above from the client's `command_t` tables. |
 
@@ -83,5 +92,13 @@ renaming a command group, run `python3 tools/gen_group_descriptions.py`.
   console is always available.
 - Interactive prompts *inside* a command (e.g. a confirmation) are answered by
   typing in the console.
-- Tested on Linux. The subprocess/serial paths use Qt's `QProcess`, which is
-  cross-platform; macOS and Windows should work but are not yet exercised here.
+- The **Stop** button sends Enter to the client. On Linux/macOS this is read
+  from the pipe natively. On Windows the stock client reads key presses from a
+  console that a background GUI process does not have — this repo includes a
+  small `client/src/util.c` change so the Windows client also accepts the Enter
+  from a pipe. Without that patch, use Disconnect (force-kill) to stop on
+  Windows.
+- Tested on Linux against a real built client (offline mode). The
+  subprocess/serial paths use Qt's `QProcess`, which is cross-platform; the
+  Windows `kbd_enter_pressed` change was compile-checked with mingw but not yet
+  run on Windows/macOS hardware.

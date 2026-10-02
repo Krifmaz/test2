@@ -111,6 +111,17 @@ def parse_option(line: str) -> Optional[Option]:
     )
 
 
+# A handful of commands in commands.json carry the whole group help listing
+# as their "description" (an artifact of how it is generated). Detect and drop
+# that noise so the GUI shows a clean (or empty) description instead.
+_HELP_DUMP_RE = re.compile(r"This help|available offline:|-{5,}")
+
+
+def _clean_description(desc: str) -> str:
+    desc = (desc or "").strip()
+    return "" if _HELP_DUMP_RE.search(desc) else desc
+
+
 def _parse_command(name: str, blob: dict) -> Command:
     opts = []
     for raw in blob.get("options", []) or []:
@@ -122,7 +133,7 @@ def _parse_command(name: str, blob: dict) -> Command:
             opts.append(o)
     return Command(
         name=name,
-        description=(blob.get("description") or "").strip(),
+        description=_clean_description(blob.get("description")),
         usage=(blob.get("usage") or "").strip(),
         offline=bool(blob.get("offline", False)),
         notes=list(blob.get("notes", []) or []),
@@ -174,7 +185,9 @@ class CommandSet:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
         cmds = [_parse_command(name, blob)
-                for name, blob in sorted(data.get("commands", {}).items())]
+                for name, blob in sorted(data.get("commands", {}).items())
+                # Drop per-group "help" pseudo-commands; the GUI is the help.
+                if name.split(" ")[-1] != "help"]
         return cls(cmds, load_group_descriptions())
 
     def describe(self, path: str) -> str:

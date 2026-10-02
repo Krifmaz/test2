@@ -13,10 +13,10 @@
 #
 # See LICENSE.txt for the text of the license.
 #-----------------------------------------------------------------------------
-# Owns a long-lived `proxmark3` client subprocess. Commands are written to
-# the client's stdin one at a time; its merged stdout/stderr is streamed back
-# and split into per-command blocks using the "[...] pm3 -->" prompt as the
-# completion marker (see client/src/proxmark3.h PROXPROMPT_COMPOSE).
+# Owns a long-lived `proxmark3` client fed through a stdin pipe.
+# On a pipe the client echoes "[dev|script] pm3 --> <cmd>" before each
+# command and never prints an idle prompt, so each command line gets a
+# trailing "rem" marker and its remark line signals completion.
 #-----------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -26,13 +26,16 @@ import re
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 
 
-# Strips ANSI SGR / cursor sequences so the console and prompt matcher see
-# plain text regardless of whether the client emitted colour.
-_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][AB012]|[\r\x07]")
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][AB012]|[\x01\x02\x07]")
 
-# The interactive prompt the client prints when it is ready for input, e.g.
-#   "[usb] pm3 --> "  "[offline] pm3 --> "  "[usb|tcp] pm5 --> "
-_PROMPT_RE = re.compile(r"\[(?P<state>[^\]]*)\]\s*pm[35]\s*-->\s*$")
+# Echo of a command about to run: "[usb|script] pm3 --> hw version"
+_ECHO_RE = re.compile(r"^\[(?P<state>[^\]]*)\]\s*pm[35]\s*-->\s?(?P<cmd>.*)$")
+
+_MARK = "__pm3gui_done_"
+_MARK_RE = re.compile(r"remark:\s*" + _MARK + r"(?P<seq>\d+)__")
+
+# Client reads stdin with fgets into a 256-byte buffer (proxmark3.c).
+MAX_LINE = 255
 
 
 def strip_ansi(text: str) -> str:
@@ -40,19 +43,20 @@ def strip_ansi(text: str) -> str:
 
 
 class Pm3Session(QObject):
-    """A single interactive client session.
+    """A single client session.
 
     Signals:
-        output(str)          raw (ansi-stripped) text as it streams in
-        prompt(str)          device state token at each prompt ("usb"/"offline"/...)
-        command_finished(str, str)   (command, full captured output block)
-        started()            client process is up
-        stopped(int)         client exited, with exit code
-        error(str)           spawn / pipe failure
+        line(str, str)        one output line and its kind:
+                              "echo" (command echo) or "out"
+        state(str)            device token from each echo: "usb", "offline", ...
+        busy(bool)            a command is running / the queue drained
+        command_finished(str, str)  (command, captured output)
+        started() / stopped(int) / error(str)
     """
 
-    output = Signal(str)
-    prompt = Signal(str)
+    line = Signal(str, str)
+    state = Signal(str)
+    busy = Signal(bool)
     command_finished = Signal(str, str)
     started = Signal()
     stopped = Signal(int)
@@ -66,117 +70,141 @@ class Pm3Session(QObject):
         self._proc = QProcess(self)
         self._proc.setProcessChannelMode(QProcess.MergedChannels)
         self._proc.readyRead.connect(self._on_ready_read)
-        self._proc.started.connect(self.started)
+        self._proc.started.connect(self._on_started)
         self._proc.finished.connect(self._on_finished)
         self._proc.errorOccurred.connect(self._on_error)
 
-        self._buf = ""          # text seen since the last prompt
-        self._pending = None     # command we are currently waiting on
-        self._queue: list = []   # commands waiting for their turn
-        self._ready = False      # at a prompt, free to send the next command
+        self._partial = ""       # trailing text without a newline yet
+        self._pending = None     # (seq, command) currently running
+        self._captured: list = []
+        self._queue: list = []
+        self._seq = 0
         self._last_state = "offline"
 
     # -- lifecycle ----------------------------------------------------------
 
     def start(self):
-        args = []
-        if self._port:
-            args += [self._port]
-        else:
-            # No device: still useful for offline commands (demod, file ops).
-            args += ["--offline"]
-        # -f flushes output after every print so the GUI stays responsive.
+        # No port: the client starts in offline mode on its own.
+        args = [self._port] if self._port else []
+        # -f flushes after every print so output streams live.
         args += ["-f"] + self._extra
-        env = QProcessEnvironment.systemEnvironment()
-        # Ask the client not to use the pager; we scroll in the GUI.
-        env.insert("PAGER", "cat")
-        self._proc.setProcessEnvironment(env)
+        self._proc.setProcessEnvironment(QProcessEnvironment.systemEnvironment())
         self._proc.start(self._exe, args)
 
     def stop(self):
+        if self._proc.state() == QProcess.NotRunning:
+            return
+        self._queue.clear()
+        self._proc.write(b"quit\n")
+        if not self._proc.waitForFinished(3000):
+            self._proc.kill()
+            self._proc.waitForFinished(1000)
+
+    def kill(self):
+        """Hard stop for a command that ignores Stop."""
+        self._queue.clear()
         if self._proc.state() != QProcess.NotRunning:
-            # "quit" lets the client flush and close the device cleanly.
-            self._write_line("quit")
-            if not self._proc.waitForFinished(3000):
-                self._proc.kill()
+            self._proc.kill()
+            self._proc.waitForFinished(2000)
 
     def is_running(self) -> bool:
         return self._proc.state() != QProcess.NotRunning
 
+    def is_busy(self) -> bool:
+        return self._pending is not None
+
     def device_state(self) -> str:
         return self._last_state
 
-    # -- sending commands ---------------------------------------------------
+    # -- commands -----------------------------------------------------------
 
-    def send(self, command: str):
-        """Queue a command. It runs once the client is back at a prompt."""
+    def send(self, command: str) -> bool:
+        """Queue a command; returns False if it is too long for the client."""
         command = command.strip()
         if not command:
-            return
+            return True
+        if len(self._wire(command, 999999)) > MAX_LINE:
+            self.error.emit("Command is too long for the client (max %d "
+                            "characters). Split it up or use a script file."
+                            % (MAX_LINE - len(self._wire("", 999999))))
+            return False
         self._queue.append(command)
         self._pump()
+        return True
 
     def interrupt(self):
-        """Best-effort cancel of a long-running command (Ctrl-C to client)."""
-        # QProcess has no portable SIGINT; closing the write channel and
-        # sending an empty line nudges most blocking reader loops. Callers
-        # that need a hard stop should stop()/start() the session.
-        self._proc.write(b"\n")
+        """Ask the running command to stop, same as pressing Enter."""
+        if self._pending is not None:
+            self._proc.write(b"\n")
+
+    def _wire(self, command: str, seq: int) -> str:
+        return "%s;rem %s%d__" % (command, _MARK, seq)
 
     def _pump(self):
-        if not self._ready or self._pending is not None:
+        if self._pending is not None or not self._queue:
             return
-        if not self._queue:
+        if self._proc.state() != QProcess.Running:
             return
-        self._pending = self._queue.pop(0)
-        self._buf = ""
-        self._ready = False
-        self._write_line(self._pending)
-
-    def _write_line(self, line: str):
-        if self._proc.state() == QProcess.NotRunning:
-            self.error.emit("Client is not running.")
-            return
-        self._proc.write((line + "\n").encode("utf-8", "replace"))
+        self._seq += 1
+        cmd = self._queue.pop(0)
+        self._pending = (self._seq, cmd)
+        self._captured = []
+        self.busy.emit(True)
+        self._proc.write((self._wire(cmd, self._seq) + "\n").encode("utf-8", "replace"))
 
     # -- process plumbing ---------------------------------------------------
 
+    def _on_started(self):
+        self.started.emit()
+        self._pump()
+
     def _on_ready_read(self):
-        chunk = bytes(self._proc.readAll()).decode("utf-8", "replace")
-        text = strip_ansi(chunk)
-        if text:
-            self.output.emit(text)
-        self._buf += text
-        self._drain_prompts()
+        text = strip_ansi(bytes(self._proc.readAll()).decode("utf-8", "replace"))
+        # Progress lines redraw with a bare CR; show each redraw as a line.
+        text = self._partial + text.replace("\r\n", "\n").replace("\r", "\n")
+        lines = text.split("\n")
+        self._partial = lines.pop()
+        for ln in lines:
+            self._handle_line(ln)
 
-    def _drain_prompts(self):
-        # A prompt can arrive mid-buffer; process every complete line that
-        # ends in the prompt marker.
-        while True:
-            m = None
-            for cand in _PROMPT_RE.finditer(self._buf):
-                m = cand
-            if not m:
-                # No prompt yet; keep buffering until more output arrives.
-                return
-            state = m.group("state").split("|", 1)[0].strip() or "offline"
-            self._last_state = state
-            self.prompt.emit(state)
-
-            if self._pending is not None:
-                block = self._buf[:m.start()]
-                self.command_finished.emit(self._pending, block.strip("\n"))
+    def _handle_line(self, ln: str):
+        mark = _MARK_RE.search(ln)
+        if mark:
+            if self._pending and int(mark.group("seq")) == self._pending[0]:
+                _, cmd = self._pending
                 self._pending = None
-            self._buf = self._buf[m.end():]
-            self._ready = True
-            self._pump()
-            # Loop again in case the trailing buffer already holds another
-            # prompt (queued commands echoed back-to-back).
-            if self._pending is not None or not self._queue:
+                self.command_finished.emit(cmd, "\n".join(self._captured))
+                self._captured = []
+                if self._queue:
+                    self._pump()
+                else:
+                    self.busy.emit(False)
+            return
+
+        echo = _ECHO_RE.match(ln)
+        if echo:
+            state = echo.group("state").split("|", 1)[0].strip() or "offline"
+            if state != self._last_state:
+                self._last_state = state
+            self.state.emit(state)
+            if echo.group("cmd").startswith("rem " + _MARK):
                 return
+            self.line.emit(echo.group("cmd"), "echo")
+            return
+
+        if self._pending is not None:
+            self._captured.append(ln)
+        self.line.emit(ln, "out")
 
     def _on_finished(self, code, _status):
-        self._ready = False
+        if self._partial:
+            self.line.emit(self._partial, "out")
+            self._partial = ""
+        was_busy = self._pending is not None
+        self._pending = None
+        self._queue.clear()
+        if was_busy:
+            self.busy.emit(False)
         self.stopped.emit(int(code))
 
     def _on_error(self, _err):

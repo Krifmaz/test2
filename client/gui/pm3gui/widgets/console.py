@@ -13,18 +13,38 @@
 #
 # See LICENSE.txt for the text of the license.
 #-----------------------------------------------------------------------------
-# A read-only output console plus a command entry line with history, so the
-# full client CLI remains available for anything the forms do not cover.
+# A colour-coded output console plus a command entry with history, so the full
+# client CLI stays available for anything the forms do not cover.
 #-----------------------------------------------------------------------------
 
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout,
     QWidget,
 )
+
+from .. import theme
+
+# Maps the client's leading status tag to a console colour kind.
+_TAG_RE = re.compile(r"^\s*\[(?P<tag>[-+=!#?@ ]{1,2})\]")
+_TAG_KIND = {
+    "+": "success",
+    "-": "error", "!!": "error",
+    "!": "warn",
+    "=": "info", "#": "info", "@": "info",
+}
+
+
+def classify(line: str) -> str:
+    m = _TAG_RE.match(line)
+    if m:
+        return _TAG_KIND.get(m.group("tag").strip(), "out")
+    return "out"
 
 
 class Console(QWidget):
@@ -36,30 +56,29 @@ class Console(QWidget):
         super().__init__(parent)
         self._history: list = []
         self._hist_idx = 0
-        self._max_blocks = 5000
 
         self.view = QPlainTextEdit(self)
         self.view.setObjectName("Console")
         self.view.setReadOnly(True)
-        self.view.setMaximumBlockCount(self._max_blocks)
+        self.view.setMaximumBlockCount(8000)
 
         self.entry = QLineEdit(self)
         self.entry.setPlaceholderText("Type a client command, e.g. hw version")
         self.entry.returnPressed.connect(self._submit)
         self.entry.installEventFilter(self)
 
-        send = QPushButton("Send", self)
-        send.setObjectName("Primary")
-        send.clicked.connect(self._submit)
+        self.send_btn = QPushButton("Send", self)
+        self.send_btn.setObjectName("Primary")
+        self.send_btn.clicked.connect(self._submit)
 
         clear = QPushButton("Clear", self)
         clear.clicked.connect(self.view.clear)
 
         row = QHBoxLayout()
         row.setSpacing(8)
-        row.addWidget(QLabel("pm3 →"))
+        row.addWidget(QLabel("pm3 ›"))
         row.addWidget(self.entry, 1)
-        row.addWidget(send)
+        row.addWidget(self.send_btn)
         row.addWidget(clear)
 
         lay = QVBoxLayout(self)
@@ -68,20 +87,30 @@ class Console(QWidget):
         lay.addWidget(self.view, 1)
         lay.addLayout(row)
 
-    def append(self, text: str):
-        if not text:
-            return
+    def _write(self, text: str, color: str):
         cur = self.view.textCursor()
         cur.movePosition(QTextCursor.End)
-        cur.insertText(text)
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(color))
+        cur.insertText(text, fmt)
         self.view.setTextCursor(cur)
         self.view.ensureCursorVisible()
 
-    def append_line(self, text: str = ""):
-        self.append(text + "\n")
+    def append_line(self, text: str, kind: str = "out"):
+        color = theme.CONSOLE_COLORS.get(kind, theme.CONSOLE_FG)
+        if kind == "echo":
+            text = "› " + text
+        self._write(text + "\n", color)
+
+    def append_output(self, line: str):
+        """A plain output line from the client, auto-classified by its tag."""
+        self.append_line(line, classify(line))
+
+    def append_system(self, text: str):
+        self._write(text + "\n", theme.CONSOLE_COLORS["sys"])
 
     def echo_command(self, cmd: str):
-        self.append_line("\n[>] " + cmd)
+        self.append_line(cmd, "echo")
 
     def _submit(self):
         cmd = self.entry.text().strip()
@@ -94,11 +123,10 @@ class Console(QWidget):
 
     def eventFilter(self, obj, event):
         if obj is self.entry and event.type() == event.Type.KeyPress:
-            key = event.key()
-            if key == Qt.Key_Up:
+            if event.key() == Qt.Key_Up:
                 self._recall(-1)
                 return True
-            if key == Qt.Key_Down:
+            if event.key() == Qt.Key_Down:
                 self._recall(1)
                 return True
         return super().eventFilter(obj, event)

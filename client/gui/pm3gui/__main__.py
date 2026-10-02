@@ -57,9 +57,11 @@ def main(argv=None) -> int:
     app.setStyleSheet(theme.STYLESHEET)
 
     win = MainWindow(cmdset, client_exe=args.client)
+    win.show()
     if args.port:
         win.port_combo.setEditText(args.port)
-    win.show()
+        # Auto-connect when a port was given on the command line.
+        win.start_connection()
     return app.exec()
 
 

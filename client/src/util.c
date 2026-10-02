@@ -91,6 +91,17 @@ int kbd_enter_pressed(void) {
 #include <conio.h>
 int kbd_enter_pressed(void) {
     int ret = 0;
+    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+    if (GetFileType(h) == FILE_TYPE_PIPE) {
+        // stdin is a pipe (e.g. a GUI front-end): a newline counts as Enter
+        DWORD avail = 0;
+        while (PeekNamedPipe(h, NULL, 0, NULL, &avail, NULL) && (avail > 0)) {
+            for (DWORD i = 0; i < avail; i++) {
+                ret |= getchar() == '\n';
+            }
+        }
+        return ret;
+    }
     while (kbhit()) {
         ret |= getch() == '\r';
     }
