@@ -1,0 +1,2 @@
+# pm3gui runtime dependencies
+PySide6>=6.5

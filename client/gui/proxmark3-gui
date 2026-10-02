@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Launch the Proxmark3 Studio GUI from this checkout.
+# Usage: ./proxmark3-gui [--client /path/to/proxmark3] [--port /dev/ttyACM0]
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$here"
+exec python3 -m pm3gui "$@"
