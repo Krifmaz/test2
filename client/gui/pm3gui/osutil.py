@@ -54,6 +54,29 @@ def find_client() -> str:
     return CLIENT_NAME
 
 
+def resolve_client(path: str) -> str:
+    """Absolute path of a usable client binary, or "" if `path` isn't one.
+
+    Accepts a full path or a bare name on PATH. Rejects files that can't be
+    the client (on Windows, anything but an .exe), so a stray pick in the
+    file dialog or a stale saved setting never reaches QProcess.
+    """
+    path = (path or "").strip().strip('"')
+    if not path:
+        return ""
+    if os.path.dirname(path):
+        found = path if os.path.isfile(path) else ""
+    else:
+        found = shutil.which(path) or ""
+    if not found:
+        return ""
+    if IS_WINDOWS and not found.lower().endswith(".exe"):
+        return ""
+    if not IS_WINDOWS and not os.access(found, os.X_OK):
+        return ""
+    return os.path.abspath(found)
+
+
 def _proxspace_roots(exe: str) -> list:
     """ProxSpace folders: any parent of the client that holds msys2/, then defaults."""
     roots = []

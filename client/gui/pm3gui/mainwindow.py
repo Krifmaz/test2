@@ -20,6 +20,8 @@
 
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -300,8 +302,8 @@ class MainWindow(QMainWindow):
     # -- settings -----------------------------------------------------------
 
     def _restore_settings(self):
-        exe = self._settings.value("client", "")
-        if exe and not self.exe_edit.text().strip():
+        exe = osutil.resolve_client(self._settings.value("client", ""))
+        if exe and not osutil.resolve_client(self.exe_edit.text()):
             self.exe_edit.setText(exe)
         port = self._settings.value("port", "")
         # A detected Proxmark3 beats the remembered port.
@@ -343,7 +345,12 @@ class MainWindow(QMainWindow):
         return text
 
     def _browse_exe(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Locate proxmark3 client")
+        start = os.path.dirname(osutil.resolve_client(self.exe_edit.text())
+                                or osutil.resolve_client(osutil.find_client()))
+        filt = ("Proxmark3 client (proxmark3.exe);;Programs (*.exe)"
+                if osutil.IS_WINDOWS else "")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Locate proxmark3 client", start, filt)
         if path:
             self.exe_edit.setText(path)
 
@@ -351,10 +358,22 @@ class MainWindow(QMainWindow):
         """Public: connect now (used by --port auto-connect and the button)."""
         if self.session and self.session.is_running():
             return
-        exe = self.exe_edit.text().strip()
+        typed = self.exe_edit.text().strip()
+        exe = osutil.resolve_client(typed)
         if not exe:
-            QMessageBox.warning(self, "No client", "Set the proxmark3 client path.")
-            return
+            # Stale setting or wrong file picked: fall back to auto-detect.
+            exe = osutil.resolve_client(osutil.find_client())
+            if not exe:
+                QMessageBox.warning(
+                    self, "Client not found",
+                    "Could not find the proxmark3 client%s.\n\nBuild it first, "
+                    "then use Browse to select %s."
+                    % (" at \"%s\"" % typed if typed else "", osutil.CLIENT_NAME))
+                return
+            if typed:
+                self.console.append_system(
+                    "[*] \"%s\" is not a usable client; using %s" % (typed, exe))
+        self.exe_edit.setText(exe)
         port = self._current_port()
         self._save_settings()
         self.session = Pm3Session(exe, port)

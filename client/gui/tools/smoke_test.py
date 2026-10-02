@@ -138,10 +138,29 @@ def main():
     s.stop()
     check(wait_until(app, lambda: not s.is_running(), 10), "client quits cleanly")
 
+    check(osutil.resolve_client(args.client) != "", "client path resolves")
+    junk = os.path.join(tempfile.mkdtemp(), "preferences.json")
+    with open(junk, "w") as fh:
+        fh.write("{}")
+    check(osutil.resolve_client(junk) == "" if osutil.IS_WINDOWS else True,
+          "non-program rejected as client")
+    check(osutil.resolve_client("no_such_dir/proxmark3.exe") == "",
+          "missing client rejected")
+
     win = MainWindow(cs, client_exe=args.client)
     win.resize(1400, 880)
     win.show()
     app.processEvents()
+
+    # A stale/wrong client path must fall back to the real client.
+    win.exe_edit.setText(junk if osutil.IS_WINDOWS else "proxmark3_missing")
+    win.port_combo.setEditText("")
+    win.start_connection()
+    ok = win.session is not None and wait_until(app, win.session.is_running, 15)
+    check(ok and os.path.samefile(win.exe_edit.text(), args.client),
+          "bad client path falls back to the built client")
+    if win.session:
+        win.session.stop()
     if args.shot:
         win.grab().save(args.shot)
         print("screenshot:", args.shot)
