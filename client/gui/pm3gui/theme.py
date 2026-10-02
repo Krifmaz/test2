@@ -63,6 +63,9 @@ QPushButton:hover {{ border: 1px solid {ACCENT}; }}
 QPushButton:disabled {{ color: {MUTED}; }}
 QPushButton#Primary {{ background: {ACCENT}; color: #06201b; border: 0; }}
 QPushButton#Primary:hover {{ background: {ACCENT_DIM}; }}
+QPushButton#Example {{ text-align: left; font-weight: 400; color: {ACCENT};
+    font-family: "JetBrains Mono", "Cascadia Code", "DejaVu Sans Mono", "Menlo", monospace;
+    font-size: 12px; padding: 5px 10px; }}
 QPushButton#Danger {{ border: 1px solid {DANGER}; color: {DANGER}; }}
 
 QCheckBox {{ spacing: 8px; }}
@@ -74,6 +77,8 @@ QTreeWidget, QListWidget {{ background: {BG1}; border: 1px solid {BORDER};
     border-radius: 10px; outline: 0; }}
 QTreeWidget::item, QListWidget::item {{ padding: 4px 6px; border-radius: 5px; }}
 QTreeWidget::item:selected, QListWidget::item:selected {{ background: {ACCENT_DIM}; color: #06201b; }}
+QHeaderView::section {{ background: {BG1}; color: {MUTED}; border: 0;
+    border-bottom: 1px solid {BORDER}; padding: 6px; font-weight: 600; }}
 QTreeWidget::item:hover, QListWidget::item:hover {{ background: {BG2}; }}
 
 QPlainTextEdit#Console {{

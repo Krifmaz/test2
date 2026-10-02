@@ -95,7 +95,7 @@ class MainWindow(QMainWindow):
         self._forms: dict = {}        # command name -> CommandForm (lazy)
 
         self.setWindowTitle("Proxmark3 Studio — Iceman GUI")
-        self.resize(1280, 820)
+        self.resize(1400, 880)
 
         self._build_connection_bar(client_exe)
         self._build_body()
@@ -114,8 +114,7 @@ class MainWindow(QMainWindow):
 
         self.exe_edit = QLineEdit(client_exe or guess_client())
         self.exe_edit.setMinimumWidth(240)
-        browse = QPushButton("…")
-        browse.setFixedWidth(34)
+        browse = QPushButton("Browse")
         browse.clicked.connect(self._browse_exe)
 
         self.port_combo = QComboBox()
@@ -150,7 +149,10 @@ class MainWindow(QMainWindow):
         self.search.textChanged.connect(self._filter_tree)
         tv.addWidget(self.search)
         self.tree = QTreeWidget()
-        self.tree.setHeaderHidden(True)
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["Command", "What it does"])
+        self.tree.setColumnWidth(0, 150)
+        self.tree.setWordWrap(False)
         self.tree.currentItemChanged.connect(self._on_tree_select)
         tv.addWidget(self.tree, 1)
         left_tabs.addTab(tree_panel, "Commands")
@@ -194,13 +196,14 @@ class MainWindow(QMainWindow):
         right_split.addWidget(self.console)
         right_split.setStretchFactor(0, 3)
         right_split.setStretchFactor(1, 2)
+        right_split.setSizes([520, 280])
 
         main_split = QSplitter(Qt.Horizontal)
         main_split.addWidget(left_tabs)
         main_split.addWidget(right_split)
         main_split.setStretchFactor(0, 0)
         main_split.setStretchFactor(1, 1)
-        main_split.setSizes([320, 960])
+        main_split.setSizes([480, 900])
 
         central = QWidget()
         cv = QVBoxLayout(central)
@@ -221,19 +224,24 @@ class MainWindow(QMainWindow):
         self.tree.clear()
         tree = self.cmdset.tree()
 
-        def add(parent, node):
+        def add(parent, node, prefix):
             for key in sorted(node.keys()):
                 val = node[key]
+                path = (prefix + " " + key).strip()
+                desc = self.cmdset.describe(path)
+                item = QTreeWidgetItem([key, desc])
+                item.setToolTip(0, path)
+                item.setToolTip(1, desc)
                 if isinstance(val, Command):
-                    item = QTreeWidgetItem([key])
                     item.setData(0, Qt.UserRole, val.name)
-                    item.setToolTip(0, val.description)
                     _attach(parent, item)
                 else:
-                    group = QTreeWidgetItem([key])
-                    group.setData(0, Qt.UserRole, None)
-                    _attach(parent, group)
-                    add(group, val)
+                    item.setData(0, Qt.UserRole, None)
+                    font = item.font(0)
+                    font.setBold(True)
+                    item.setFont(0, font)
+                    _attach(parent, item)
+                    add(item, val, path)
 
         def _attach(parent, item):
             if parent is None:
@@ -241,19 +249,18 @@ class MainWindow(QMainWindow):
             else:
                 parent.addChild(item)
 
-        add(None, tree)
+        add(None, tree, "")
 
     def _filter_tree(self, text: str):
         text = text.strip().lower()
 
         def visit(item) -> bool:
             name = item.data(0, Qt.UserRole)
-            match = text in item.text(0).lower()
-            if name:  # leaf command: also match the full path + description
-                cmd = self.cmdset.by_name.get(name)
-                if cmd and (text in cmd.name.lower()
-                            or text in cmd.description.lower()):
-                    match = True
+            match = (text in item.text(0).lower()
+                     or text in item.text(1).lower()
+                     or text in item.toolTip(0).lower())
+            if name and text in name.lower():
+                match = True
             child_match = False
             for i in range(item.childCount()):
                 child_match = visit(item.child(i)) or child_match
@@ -280,11 +287,17 @@ class MainWindow(QMainWindow):
             cmd = self.cmdset.by_name.get(name)
             if cmd is None:
                 return
-            form = CommandForm(cmd)
+            form = CommandForm(cmd, self.cmdset)
             form.run_requested.connect(self._run_command)
+            form.example_chosen.connect(self._load_example)
             self._forms[name] = form
             self.form_stack.addWidget(form)
         self.form_stack.setCurrentWidget(form)
+
+    def _load_example(self, line: str):
+        self.console.entry.setText(line)
+        self.console.entry.setFocus()
+        self.statusBar().showMessage("Example loaded \u2014 edit if needed, then press Enter", 5000)
 
     # -- connection ---------------------------------------------------------
 

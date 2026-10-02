@@ -145,12 +145,24 @@ def default_commands_json() -> Optional[str]:
     return None
 
 
+def load_group_descriptions() -> dict:
+    """Group help ("hf 14a" -> "ISO14443A RFIDs"), from tools/gen_group_descriptions.py."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "group_descriptions.json")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
 class CommandSet:
     """The full parsed command catalogue, plus a group/sub-group tree."""
 
-    def __init__(self, commands: list):
+    def __init__(self, commands: list, groups: Optional[dict] = None):
         self.commands = commands
         self.by_name = {c.name: c for c in commands}
+        self.groups = groups or {}
 
     @classmethod
     def load(cls, path: Optional[str] = None) -> "CommandSet":
@@ -163,11 +175,23 @@ class CommandSet:
             data = json.load(fh)
         cmds = [_parse_command(name, blob)
                 for name, blob in sorted(data.get("commands", {}).items())]
-        return cls(cmds)
+        return cls(cmds, load_group_descriptions())
 
-    @property
-    def metadata(self) -> dict:
-        return {}
+    def describe(self, path: str) -> str:
+        """One-line description for a command or a command group path."""
+        cmd = self.by_name.get(path)
+        if cmd is not None:
+            return cmd.description
+        return self.groups.get(path, "")
+
+    def breadcrumb(self, name: str) -> list:
+        """[(path, description), ...] for each parent group of `name`."""
+        parts = name.split(" ")
+        out = []
+        for i in range(1, len(parts)):
+            path = " ".join(parts[:i])
+            out.append((path, self.groups.get(path, "")))
+        return out
 
     def tree(self) -> dict:
         """Nested dict keyed by command word, leaves hold a Command.

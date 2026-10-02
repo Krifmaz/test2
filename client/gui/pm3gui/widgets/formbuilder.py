@@ -58,8 +58,9 @@ class CommandForm(QWidget):
 
     run_requested = Signal(str)       # the assembled command line
     preview_changed = Signal(str)
+    example_chosen = Signal(str)      # an example line to load for editing
 
-    def __init__(self, command: Command, parent=None):
+    def __init__(self, command: Command, cmdset=None, parent=None):
         super().__init__(parent)
         self.command = command
         self._rows: list = []
@@ -69,26 +70,60 @@ class CommandForm(QWidget):
         root.setSpacing(12)
 
         # Header -----------------------------------------------------------
+        if cmdset is not None:
+            crumbs = [desc or path for path, desc in cmdset.breadcrumb(command.name)]
+            if crumbs:
+                crumb = QLabel("  \u203a  ".join(crumbs))
+                crumb.setObjectName("OptHelp")
+                crumb.setWordWrap(True)
+                root.addWidget(crumb)
+
         title = QLabel(command.name)
         title.setObjectName("Title")
         root.addWidget(title)
-
-        if command.description:
-            desc = QLabel(command.description)
-            desc.setObjectName("Subtitle")
-            desc.setWordWrap(True)
-            root.addWidget(desc)
 
         badge = QLabel("offline capable" if command.offline
                        else "needs connected device")
         badge.setObjectName("Subtitle")
         root.addWidget(badge)
 
-        # Options ----------------------------------------------------------
         body = QWidget()
         form = QVBoxLayout(body)
         form.setContentsMargins(0, 0, 0, 0)
         form.setSpacing(10)
+
+        # What it does -----------------------------------------------------
+        whdr = QLabel("What it does")
+        whdr.setObjectName("SectionHeader")
+        form.addWidget(whdr)
+        desc = QLabel(command.description or "No description provided by the client.")
+        desc.setWordWrap(True)
+        desc.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        form.addWidget(desc)
+        if command.usage:
+            usage = QLabel(command.usage)
+            usage.setObjectName("OptHelp")
+            usage.setWordWrap(True)
+            usage.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            form.addWidget(usage)
+
+        # Examples from the client's own help; click to load for editing.
+        examples = [n.strip() for n in command.notes
+                    if n.strip().startswith(command.name)]
+        if examples:
+            ehdr = QLabel("Examples (click to load into the console)")
+            ehdr.setObjectName("SectionHeader")
+            form.addWidget(ehdr)
+            for ex in examples:
+                b = QPushButton(ex)
+                b.setObjectName("Example")
+                b.setToolTip("Load into the console so you can edit and run it")
+                # Client examples may end in "-> explanation"; load the command only.
+                cmdline = ex.split("->", 1)[0].strip()
+                b.clicked.connect(lambda _=False, e=cmdline: self.example_chosen.emit(e))
+                form.addWidget(b)
+
+        # Options ----------------------------------------------------------
 
         if command.options:
             hdr = QLabel("Options")
