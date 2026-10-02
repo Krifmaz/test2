@@ -1,6 +1,6 @@
 @echo off
 rem Launch Proxmark3 Studio on Windows. Installs PySide6 on first run.
-rem Usage: proxmark3-gui.cmd [--client C:\ProxSpace\pm3\client\proxmark3.exe] [--port COM5]
+rem Usage: proxmark3-gui.cmd [--client C:\ProxSpace\pm3\test2\client\proxmark3.exe] [--port COM5]
 setlocal
 cd /d "%~dp0"
 

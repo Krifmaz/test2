@@ -64,7 +64,7 @@ python3 -m pm3gui --help              # all options
 
 1. Build the client with ProxSpace, following
    `doc/md/Installation_Instructions/Windows-Installation-Instructions.md`.
-   You end up with `C:\ProxSpace\pm3\client\proxmark3.exe`. Build from this
+   You end up with `C:\ProxSpace\pm3\test2\client\proxmark3.exe`. Build from this
    branch so the Stop button works (see Notes below).
 2. Install Python 3 from https://www.python.org/downloads/ and tick
    **Add python.exe to PATH** during setup.
