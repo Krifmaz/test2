@@ -117,7 +117,20 @@ def check_clone(check):
     check(clone.detect_hf(HF_DESFIRE_SEARCH).clone == "",
           "hf: DESFire not copyable")
     check(clone.hf_dump_cmd("mfc") == "hf mf autopwn", "hf: MFC dump cmd")
-    check(clone.hf_restore_cmd("mfu", "a.json") == "hf mfu restore -f a.json",
+    # Magic generation picks cload (gen1a) vs restore (gen2); non-magic -> none.
+    gen1a = "[?] Hint: Use `hf mf c*` magic commands\n"
+    gen2 = "[?] Hint: Use `hf mf` commands\n"
+    plain = "[?] Hint: Try `hf mf info`\n"
+    check(clone.magic_gen(gen1a) == "gen1a", "hf: gen1a detected")
+    check(clone.magic_gen(gen2) == "gen2", "hf: gen2 detected")
+    check(clone.magic_gen(plain) == "", "hf: non-magic detected")
+    check(clone.magic_write_cmd("mfc", gen1a, "d.json") == "hf mf cload -f d.json",
+          "hf: gen1a uses cload")
+    check(clone.magic_write_cmd("mfc", gen2, "d.json") == "hf mf restore -f d.json",
+          "hf: gen2 uses restore")
+    check(clone.magic_write_cmd("mfc", plain, "d.json") == "",
+          "hf: non-magic refuses write")
+    check(clone.magic_write_cmd("mfu", "", "a.json") == "hf mfu restore -f a.json",
           "hf: MFU restore cmd")
     check(clone.saved_file("[+] Saved to json file hf-mf-04-dump.json")
           == "hf-mf-04-dump.json", "hf: json dump filename parsed")

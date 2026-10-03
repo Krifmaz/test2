@@ -146,6 +146,8 @@ class EasyMode(QWidget):
         elif cmd == self._pending_write:
             self._pending_write = ""
             self._after_write(output)
+        elif cmd.startswith("hf 14a info") and self._mode == "magic":
+            self._after_magic(output)
         elif cmd.startswith("hf search"):
             if self._mode == "verify":
                 self._after_verify_hf(output)
@@ -299,12 +301,40 @@ class EasyMode(QWidget):
         QMessageBox.information(
             self, "Put the magic card on",
             "Original dumped to:\n%s\n\nNow take the original OFF, put a MAGIC "
-            "%s card on the antenna, and click OK to write the copy."
+            "%s card on the antenna, and click OK to check it."
             % (dump_file, fam))
-        restore = clone.hf_restore_cmd(self._hf_family, dump_file)
-        self._pending_write = restore
+        # Probe the magic card so we write it the right way (gen1a vs gen2).
+        self._mode = "magic"
+        self.status.setText("Checking the magic card…")
+        self.run_requested.emit("hf 14a info")
+
+    def _after_magic(self, output: str):
+        self._mode = "read"
+        write = clone.magic_write_cmd(self._hf_family, output,
+                                      self._hf_restore_file)
+        if not write:
+            QMessageBox.warning(
+                self, "Not a magic card",
+                "The card on the antenna doesn't look like a magic MIFARE "
+                "(gen1a/UID or gen2/CUID). A copy can only be written to a "
+                "magic card. Put one on and press ② again.")
+            self.status.setText("Target isn't a magic card.")
+            self._refresh_buttons()
+            return
+        gen = clone.magic_gen(output)
+        ok = QMessageBox.question(
+            self, "Write copy?",
+            "Magic card detected (%s). Write the copy now?\n\n%s\n\n"
+            "This overwrites the card on the antenna."
+            % (gen or "magic", write),
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Yes)
+        if ok != QMessageBox.Yes:
+            self.status.setText("Write cancelled.")
+            self._refresh_buttons()
+            return
+        self._pending_write = write
         self.status.setText("Writing the copy to the magic card…")
-        self.run_requested.emit(restore)
+        self.run_requested.emit(write)
 
     def _after_write(self, output: str):
         low = output.lower()

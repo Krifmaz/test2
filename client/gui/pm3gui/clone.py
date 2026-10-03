@@ -313,9 +313,35 @@ def hf_dump_cmd(family: str) -> str:
     return _HF_PLANS.get(family, ("", ""))[0]
 
 
-def hf_restore_cmd(family: str, dump_file: str) -> str:
-    tmpl = _HF_PLANS.get(family, ("", ""))[1]
-    return (tmpl % dump_file) if tmpl else ""
+def magic_gen(info_out: str) -> str:
+    """Magic generation from `hf 14a info` hints: gen1a, gen2, or '' (not magic).
+
+    gen1a cards hint `hf mf c*` (backdoor), gen2/CUID hint `hf mf` commands,
+    and a normal card hints `hf mf info` instead.
+    """
+    info_out = info_out or ""
+    if "hf mf c*" in info_out:
+        return "gen1a"
+    if "Use `hf mf` commands" in info_out:
+        return "gen2"
+    return ""
+
+
+def magic_write_cmd(family: str, info_out: str, dump_file: str) -> str:
+    """Command to write a dump to the magic target, or '' if it isn't magic.
+
+    gen1a MIFARE loads through the backdoor (cload); gen2/CUID writes with keys
+    (restore). Magic Ultralight/NTAG uses mfu restore.
+    """
+    if family == "mfu":
+        return "hf mfu restore -f %s" % dump_file
+    if family == "mfc":
+        gen = magic_gen(info_out)
+        if gen == "gen1a":
+            return "hf mf cload -f %s" % dump_file
+        if gen == "gen2":
+            return "hf mf restore -f %s" % dump_file
+    return ""
 
 
 def saved_file(out: str) -> str:
