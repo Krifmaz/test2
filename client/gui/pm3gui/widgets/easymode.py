@@ -54,18 +54,20 @@ class EasyMode(QWidget):
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(12)
 
-        intro = QLabel("Copy a 125 kHz (LF) card onto a blank T5577 in three "
-                       "steps. Keep one card on the antenna at a time.")
+        intro = QLabel("Read any card to identify it (LF 125 kHz and HF 13.56 "
+                       "MHz). LF access cards copy onto a blank in three steps; "
+                       "HF cards are identified with their security and copy "
+                       "path. Keep one card on the antenna at a time.")
         intro.setObjectName("OptHelp")
         intro.setWordWrap(True)
         root.addWidget(intro)
 
         # Step 1 — read the original
-        self.read_btn = QPushButton("①  Read the original card")
+        self.read_btn = QPushButton("①  Read / identify the card")
         self.read_btn.setObjectName("Primary")
         self.read_btn.clicked.connect(self._do_read)
         root.addWidget(self._step_box(
-            "Place the card you want to copy on the antenna, then:",
+            "Place the card on the antenna, then read it (LF, then HF):",
             self.read_btn))
 
         # Result of the read
@@ -132,6 +134,8 @@ class EasyMode(QWidget):
         if cmd == self._pending_write:
             self._pending_write = ""
             self._after_write(output)
+        elif cmd.startswith("hf search"):
+            self._after_hf(output)
         elif cmd == clone.READ_COMMAND or cmd.startswith("lf search"):
             if self._mode == "target":
                 self._after_target(output)
@@ -178,13 +182,28 @@ class EasyMode(QWidget):
             self.status.setText("Blank T5577 detected.")
             self._set_step(1)
         else:
+            # Nothing on LF — the card may be HF. Check 13.56 MHz too.
             self._clone_cmd = ""
+            self.status.setText("No LF card — checking 13.56 MHz (HF)…")
+            self.run_requested.emit("hf search")
+            return
+        self._refresh_buttons()
+
+    def _after_hf(self, output: str):
+        info = clone.detect_hf(output)
+        self._clone_cmd = ""      # HF is identify-only in Easy mode
+        if info:
             self.result.setText(
-                "No 125 kHz card found. Reposition the card over the LF coil "
-                "and try again. (HF 13.56 MHz cards aren't handled by Easy "
-                "mode — use the Commands tab.)")
+                "Found (HF 13.56 MHz): %s\nSecurity: %s\n%s"
+                % (info.label, info.security, info.advice))
+            self.status.setText(
+                "HF cards aren't auto-cloned here — see the notes above.")
+        else:
+            self.result.setText(
+                "No card found on LF (125 kHz) or HF (13.56 MHz). Reposition "
+                "the card on the antenna and read again.")
             self.status.setText("Nothing detected.")
-            self._set_step(1)
+        self._set_step(1)
         self._refresh_buttons()
 
     # -- step 2: write ------------------------------------------------------

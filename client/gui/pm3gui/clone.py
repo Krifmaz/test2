@@ -239,6 +239,72 @@ def detect(out: str) -> list:
     return found
 
 
+# -- HF (13.56 MHz) identification --------------------------------------------
+# Easy mode identifies HF cards and reports their security, but does not
+# auto-clone them: HF copying needs key recovery and a "magic" card, is
+# card-specific, and a wrong write bricks the tag. Each entry is matched as a
+# substring of `hf search` output; specific chips come before their family.
+HF_INFO = namedtuple("HF_INFO", "label security advice")
+
+_HF_CHECKS = [
+    ("MIFARE DESFire", "strong",
+     "AES/3DES with per-app keys. Not copyable by reading — needs the keys."),
+    ("MIFARE Plus",    "strong",
+     "AES in SL3. Not copyable without the keys."),
+    ("MIFARE DUOX",    "strong",
+     "AES/ECC. Not copyable without the keys."),
+    ("MIFARE Hospitality", "strong",
+     "Keyed. Not copyable without the keys."),
+    ("NTAG",           "none/password",
+     "Usually no crypto (may have a password/PWD). Often copyable to a magic "
+     "NTAG. Read it with `hf mfu dump`."),
+    ("MIFARE Ultralight", "none/password",
+     "Little or no crypto (UL-C/EV1 may use a password). Often copyable to a "
+     "magic Ultralight. Read it with `hf mfu dump`."),
+    ("MIFARE Mini",    "weak",
+     "Crypto1 (broken). Recover keys with `hf mf autopwn`, then clone to a "
+     "magic MIFARE card."),
+    ("MIFARE Classic", "weak",
+     "Crypto1, broken. Recover keys with `hf mf autopwn`, then clone to a "
+     "magic MIFARE card with `hf mf restore`."),
+    ("iCLASS",         "varies",
+     "Legacy iCLASS is weak (keys often recoverable); iCLASS SE/SEOS is "
+     "strong. Check with `hf iclass info`."),
+    ("PicoPass",       "varies",
+     "Check with `hf iclass info`; legacy is weak, SE/SEOS is strong."),
+    ("ISO 15693",      "varies",
+     "Vicinity card (e.g. ICODE). Many have no crypto and are readable; some "
+     "variants add crypto. Try `hf 15 info`."),
+    ("FeliCa",         "strong",
+     "Used in transit/payment. Not copyable without keys."),
+    ("LEGIC Prime",    "weak",
+     "Legacy, weak. Potentially copyable — see the `hf legic` commands."),
+    ("Topaz",          "none",
+     "NFC Type 1, typically open. Read with `hf topaz info`."),
+    ("ISO 14443-B",    "varies",
+     "14443-B family (often passports/banking). Identify further with "
+     "`hf 14b info` before judging."),
+    ("ISO 14443-A",    "varies",
+     "14443-A, exact chip not pinned down. Try `hf 14a info`."),
+]
+
+
+def detect_hf(out: str):
+    """Identify an HF card from `hf search` output as an HF_INFO, or None."""
+    out = out or ""
+    for needle, security, advice in _HF_CHECKS:
+        if needle in out:
+            return HF_INFO(_hf_label(out, needle), security, advice)
+    return None
+
+
+def _hf_label(out: str, needle: str) -> str:
+    """The client's own type phrase for a match, e.g. 'MIFARE Classic 1K'."""
+    m = re.search(r"([A-Za-z0-9/()\- ]*" + re.escape(needle)
+                  + r"[A-Za-z0-9/()\- ]*)", out)
+    return m.group(1).strip() if m else needle
+
+
 def _group_hint(label: str) -> str:
     hints = {
         "KERI": "lf keri", "FDX-B": "lf fdxb", "Destron": "lf destron",

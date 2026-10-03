@@ -63,6 +63,19 @@ BLANK_EM_SEARCH = """
 [-] No known 125/134 kHz tags found!
 [+] Chipset... EM4x05 / EM4x69
 """
+HF_MFC_SEARCH = """
+[+] UID: 04 11 22 33
+[+] ATQA: 00 04
+[+]  SAK: 08 [2]
+[+] MIFARE Classic 1K
+[+] Valid ISO 14443-A tag found
+"""
+HF_DESFIRE_SEARCH = """
+[+] MIFARE DESFire EV2
+[+] Valid ISO 14443-A tag found
+"""
+HF_ICLASS_SEARCH = "[+] Valid iCLASS tag / PicoPass tag found\n"
+HF_NONE_SEARCH = "[-] No known/supported 13.56 MHz tags found!\n"
 
 
 def check_clone(check):
@@ -89,6 +102,16 @@ def check_clone(check):
           "target: EM4x05 adds --em")
     check(clone.apply_target(base + " --em", "em4x05") == base + " --em",
           "target: --em not doubled")
+    # HF identification (identify-only, never auto-cloned).
+    hf = clone.detect_hf(HF_MFC_SEARCH)
+    check(hf and hf.label == "MIFARE Classic 1K" and hf.security == "weak",
+          "hf: MIFARE Classic 1K, weak")
+    hf = clone.detect_hf(HF_DESFIRE_SEARCH)
+    check(hf and "DESFire" in hf.label and hf.security == "strong",
+          "hf: DESFire strong")
+    hf = clone.detect_hf(HF_ICLASS_SEARCH)
+    check(hf and hf.security == "varies", "hf: iCLASS varies")
+    check(clone.detect_hf(HF_NONE_SEARCH) is None, "hf: none when no tag")
 
 
 def check_easymode(check):
@@ -106,6 +129,15 @@ def check_easymode(check):
     easy._do_read()
     easy.command_finished("lf search", BLANK_SEARCH)
     check(not easy.write_btn.isEnabled(), "easy: write disabled on blank read")
+    # No LF card -> Easy mode falls through to an HF search.
+    sent.clear()
+    easy._do_read()
+    easy.command_finished("lf search", NOTHING_SEARCH)
+    check(sent[-1] == "hf search", "easy: no LF card triggers hf search")
+    easy.command_finished("hf search", HF_MFC_SEARCH)
+    check("MIFARE Classic 1K" in easy.result.text(),
+          "easy: HF card identified in result")
+    check(not easy.write_btn.isEnabled(), "easy: HF card is not write-cloned")
     # Disconnected: every action is disabled.
     easy.set_connected(False)
     check(not easy.read_btn.isEnabled(), "easy: read disabled when offline")
