@@ -59,6 +59,10 @@ BLANK_SEARCH = """
 [?] Hint: Try `lf t55xx` commands
 """
 NOTHING_SEARCH = "[-] No known 125/134 kHz tags found!\n"
+BLANK_EM_SEARCH = """
+[-] No known 125/134 kHz tags found!
+[+] Chipset... EM4x05 / EM4x69
+"""
 
 
 def check_clone(check):
@@ -75,6 +79,16 @@ def check_clone(check):
     check(clone.detect(NOTHING_SEARCH) == [], "clone: nothing when no tag")
     check(clone.is_blank_t55xx(BLANK_SEARCH) is True, "clone: blank T5577")
     check(not clone.is_blank_t55xx(HID_SEARCH), "clone: HID is not blank")
+    # Target chip detection drives the clone flag.
+    check(clone.target_chip(BLANK_SEARCH) == "t5577", "target: T5577 chip")
+    check(clone.target_chip(BLANK_EM_SEARCH) == "em4x05", "target: EM4x05 chip")
+    check(clone.target_chip(NOTHING_SEARCH) == "", "target: none when no chip")
+    base = "lf hid clone -r 200644f6a0"
+    check(clone.apply_target(base, "t5577") == base, "target: T5577 no --em")
+    check(clone.apply_target(base, "em4x05") == base + " --em",
+          "target: EM4x05 adds --em")
+    check(clone.apply_target(base + " --em", "em4x05") == base + " --em",
+          "target: --em not doubled")
 
 
 def check_easymode(check):

@@ -181,6 +181,42 @@ def is_blank_t55xx(out: str) -> bool:
     return ("No known" in out and "Chipset" in out and "T55" in out)
 
 
+# How the client names each writable target on its "Chipset..." summary line,
+# and the human label / clone flag that goes with it.
+_TARGETS = [
+    ("em4x05", ("EM4x05", "EM4x69"), "EM4305/4469", "--em"),
+    ("t5577",  ("T55",),             "T5577",       ""),
+]
+
+
+def target_chip(out: str) -> str:
+    """Writable target on the antenna, from the search "Chipset..." line.
+
+    Returns "t5577", "em4x05", or "" when it isn't a chip Easy mode can write.
+    """
+    m = re.search(r"Chipset[^\n]*", out or "")
+    line = m.group(0) if m else ""
+    for key, needles, _label, _flag in _TARGETS:
+        if any(n in line for n in needles):
+            return key
+    return ""
+
+
+def target_label(chip: str) -> str:
+    for key, _needles, label, _flag in _TARGETS:
+        if key == chip:
+            return label
+    return chip
+
+
+def apply_target(command: str, chip: str) -> str:
+    """Point a T5577-default clone command at the detected chip."""
+    for key, _needles, _label, flag in _TARGETS:
+        if key == chip and flag and flag not in command.split():
+            return command + " " + flag
+    return command
+
+
 def detect(out: str) -> list:
     """Clonable/identified card types found in `lf search` output, best first.
 

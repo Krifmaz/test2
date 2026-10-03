@@ -84,7 +84,8 @@ class EasyMode(QWidget):
         self.write_btn.setObjectName("Primary")
         self.write_btn.clicked.connect(self._do_write)
         root.addWidget(self._step_box(
-            "Take the original off, put a blank T5577 on the antenna, then:",
+            "Take the original off, put a blank on the antenna, then click. "
+            "Easy mode detects the target (T5577 or EM4305) and writes to it:",
             self.write_btn))
 
         # Step 3 — verify
@@ -132,7 +133,9 @@ class EasyMode(QWidget):
             self._pending_write = ""
             self._after_write(output)
         elif cmd == clone.READ_COMMAND or cmd.startswith("lf search"):
-            if self._mode == "verify":
+            if self._mode == "target":
+                self._after_target(output)
+            elif self._mode == "verify":
                 self._after_verify(output)
             else:
                 self._after_read(output)
@@ -189,18 +192,36 @@ class EasyMode(QWidget):
     def _do_write(self):
         if not self._clone_cmd:
             return
+        # Check what blank is actually on the antenna, then target it.
+        self._mode = "target"
+        self.status.setText("Checking the target chip…")
+        self.run_requested.emit(clone.READ_COMMAND)
+
+    def _after_target(self, output: str):
+        self._mode = "read"
+        chip = clone.target_chip(output)
+        if not chip:
+            QMessageBox.warning(
+                self, "No writable tag",
+                "The tag on the antenna isn't a T5577 or EM4305/4469, so Easy "
+                "mode can't write to it. Put a blank writable tag on the "
+                "antenna and try again.")
+            self.status.setText("Target isn't writable.")
+            return
+        final = clone.apply_target(self._clone_cmd, chip)
         ok = QMessageBox.question(
             self, "Write copy?",
-            "Write this card onto the T5577 now on the antenna?\n\n%s\n\n"
+            "Target detected: %s\n\nWrite the copy now?\n\n%s\n\n"
             "This overwrites the tag on the antenna. Make sure it's the blank "
             "target, not your original."
-            % self._clone_cmd,
+            % (clone.target_label(chip), final),
             QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Yes)
         if ok != QMessageBox.Yes:
+            self.status.setText("Write cancelled.")
             return
-        self._pending_write = self._clone_cmd
-        self.status.setText("Writing…")
-        self.run_requested.emit(self._clone_cmd)
+        self._pending_write = final
+        self.status.setText("Writing to %s…" % clone.target_label(chip))
+        self.run_requested.emit(final)
 
     def _after_write(self, output: str):
         if "Done" in output or "done" in output:
