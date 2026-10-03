@@ -35,6 +35,7 @@ from . import osutil
 from .session import Pm3Session
 from . import theme
 from .widgets.console import Console
+from .widgets.easymode import EasyMode
 from .widgets.formbuilder import CommandForm
 
 # Curated one-click tasks: (button label, client command). These are just
@@ -120,8 +121,12 @@ class MainWindow(QMainWindow):
         self._conn_bar = bar
 
     def _build_body(self):
-        # Left: tabs (Commands tree / Quick tasks)
+        # Left: tabs (Easy mode / Commands tree / Quick tasks)
         left_tabs = QTabWidget()
+
+        self.easy = EasyMode()
+        self.easy.run_requested.connect(self._run_command)
+        left_tabs.addTab(self.easy, "Easy mode")
 
         tree_panel = QWidget()
         tv = QVBoxLayout(tree_panel)
@@ -399,6 +404,7 @@ class MainWindow(QMainWindow):
         self.session.started.connect(lambda: self._set_connected(True))
         self.session.stopped.connect(self._on_session_stopped)
         self.session.error.connect(self._on_session_error)
+        self.session.command_finished.connect(self.easy.command_finished)
         self.console.append_system(
             "[*] starting %s %s" % (exe, port or "(offline mode)"))
         self.session.start()
@@ -448,6 +454,7 @@ class MainWindow(QMainWindow):
         self.connect_btn.setText("Disconnect" if connected else "Connect")
         self.exe_edit.setEnabled(not connected)
         self.port_combo.setEnabled(not connected)
+        self.easy.set_connected(connected)
         if connected:
             self.state_label.setText("Connected")
             self._set_dot(theme.GREEN)

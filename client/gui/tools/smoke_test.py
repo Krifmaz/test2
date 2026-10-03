@@ -30,11 +30,71 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from pm3gui import osutil, theme  # noqa: E402
+from pm3gui import clone, osutil, theme  # noqa: E402
 from pm3gui.commands import CommandSet  # noqa: E402
 from pm3gui.mainwindow import MainWindow  # noqa: E402
 from pm3gui.session import Pm3Session  # noqa: E402
+from pm3gui.widgets.easymode import EasyMode  # noqa: E402
 from pm3gui.widgets.formbuilder import CommandForm  # noqa: E402
+
+# Real/representative `lf search` outputs for the offline clone-parser checks.
+HID_SEARCH = """
+[+] [H10301  ] HID H10301 26-bit                FC: 34  CN: 31568  parity ( ok )
+[=] raw: 00000000000000200644f6a0
+[+] Valid HID Prox ID found!
+[+] Chipset... T55xx
+"""
+EM410X_SEARCH = """
+[+] EM 410x ID 1234567890
+[+] Valid EM410x ID found!
+[+] Chipset... T55xx
+"""
+AWID_SEARCH = """
+[+] AWID - len: 26 FC: 12 Card: 3456 - Wiegand: ..., Raw: 011db399300000000000
+[+] Valid AWID ID found!
+"""
+BLANK_SEARCH = """
+[-] No known 125/134 kHz tags found!
+[+] Chipset... T55xx
+[?] Hint: Try `lf t55xx` commands
+"""
+NOTHING_SEARCH = "[-] No known 125/134 kHz tags found!\n"
+
+
+def check_clone(check):
+    m = clone.detect(HID_SEARCH)
+    check(len(m) == 1 and m[0].label == "HID Prox", "clone: HID recognised")
+    check(m and m[0].command == "lf hid clone -r 200644f6a0",
+          "clone: HID command (leading zeros trimmed)")
+    m = clone.detect(EM410X_SEARCH)
+    check(m and m[0].command == "lf em 410x clone --id 1234567890",
+          "clone: EM410x command")
+    m = clone.detect(AWID_SEARCH)
+    check(m and m[0].command == "lf awid clone --fmt 26 --fc 12 --cn 3456",
+          "clone: AWID fields")
+    check(clone.detect(NOTHING_SEARCH) == [], "clone: nothing when no tag")
+    check(clone.is_blank_t55xx(BLANK_SEARCH) is True, "clone: blank T5577")
+    check(not clone.is_blank_t55xx(HID_SEARCH), "clone: HID is not blank")
+
+
+def check_easymode(check):
+    easy = EasyMode()
+    sent = []
+    easy.run_requested.connect(sent.append)
+    easy.set_connected(True)
+    easy._do_read()
+    check(sent == ["lf search"], "easy: read issues lf search")
+    easy.command_finished("lf search", HID_SEARCH)
+    check(easy._clone_cmd == "lf hid clone -r 200644f6a0",
+          "easy: read builds clone command")
+    check(easy.write_btn.isEnabled(), "easy: write enabled after clonable read")
+    # A blank read leaves nothing to write.
+    easy._do_read()
+    easy.command_finished("lf search", BLANK_SEARCH)
+    check(not easy.write_btn.isEnabled(), "easy: write disabled on blank read")
+    # Disconnected: every action is disabled.
+    easy.set_connected(False)
+    check(not easy.read_btn.isEnabled(), "easy: read disabled when offline")
 
 # Waits for Enter (what the GUI's Stop sends), with a timeout so it can't hang.
 WAIT_ENTER_LUA = """
@@ -85,6 +145,9 @@ def main():
 
     app = QApplication(sys.argv[:1])
     app.setStyleSheet(theme.STYLESHEET)
+
+    check_clone(check)
+    check_easymode(check)
 
     cs = CommandSet.load()
     check(len(cs.commands) > 500, "loaded %d commands" % len(cs.commands))
