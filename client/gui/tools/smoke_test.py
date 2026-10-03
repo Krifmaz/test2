@@ -121,9 +121,15 @@ def check_clone(check):
     gen1a = "[?] Hint: Use `hf mf c*` magic commands\n"
     gen2 = "[?] Hint: Use `hf mf` commands\n"
     plain = "[?] Hint: Try `hf mf info`\n"
-    check(clone.magic_gen(gen1a) == "gen1a", "hf: gen1a detected")
-    check(clone.magic_gen(gen2) == "gen2", "hf: gen2 detected")
+    check(clone.magic_gen(gen1a) == "gen1a", "hf: gen1a detected (14a hint)")
+    check(clone.magic_gen(gen2) == "gen2", "hf: gen2 detected (14a hint)")
     check(clone.magic_gen(plain) == "", "hf: non-magic detected")
+    # `hf mf info`'s explicit capability line (real output from a Fudan gen1a).
+    mfinfo = ("[+] Magic capabilities... Gen 1a\n"
+              "[+] Magic capabilities... Gen 4 GDM / USCUID\n")
+    check(clone.magic_gen(mfinfo) == "gen1a", "hf: gen1a from hf mf info")
+    check(clone.magic_gen("[+] Magic capabilities... Gen 2\n") == "gen2",
+          "hf: gen2 from hf mf info")
     check(clone.magic_write_cmd("mfc", gen1a, "d.json") == "hf mf cload -f d.json",
           "hf: gen1a uses cload")
     check(clone.magic_write_cmd("mfc", gen2, "d.json") == "hf mf restore -f d.json",

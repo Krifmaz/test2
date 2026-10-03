@@ -146,7 +146,7 @@ class EasyMode(QWidget):
         elif cmd == self._pending_write:
             self._pending_write = ""
             self._after_write(output)
-        elif cmd.startswith("hf 14a info") and self._mode == "magic":
+        elif cmd.startswith("hf mf info") and self._mode == "magic":
             self._after_magic(output)
         elif cmd.startswith("hf search"):
             if self._mode == "verify":
@@ -306,7 +306,7 @@ class EasyMode(QWidget):
         # Probe the magic card so we write it the right way (gen1a vs gen2).
         self._mode = "magic"
         self.status.setText("Checking the magic card…")
-        self.run_requested.emit("hf 14a info")
+        self.run_requested.emit("hf mf info")
 
     def _after_magic(self, output: str):
         self._mode = "read"

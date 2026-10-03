@@ -314,15 +314,16 @@ def hf_dump_cmd(family: str) -> str:
 
 
 def magic_gen(info_out: str) -> str:
-    """Magic generation from `hf 14a info` hints: gen1a, gen2, or '' (not magic).
+    """Magic generation: gen1a, gen2, or '' (not magic).
 
-    gen1a cards hint `hf mf c*` (backdoor), gen2/CUID hint `hf mf` commands,
-    and a normal card hints `hf mf info` instead.
+    Reads `hf mf info`'s explicit "Magic capabilities... Gen 1a/Gen 2" line,
+    and also the `hf 14a info` hints (`hf mf c*` = gen1a) as a fallback. gen1a
+    wins when a card reports both, since its backdoor writes block 0/UID.
     """
-    info_out = info_out or ""
-    if "hf mf c*" in info_out:
+    out = info_out or ""
+    if "Gen 1a" in out or "hf mf c*" in out:
         return "gen1a"
-    if "Use `hf mf` commands" in info_out:
+    if "Gen 2" in out or "Use `hf mf` commands" in out:
         return "gen2"
     return ""
 
