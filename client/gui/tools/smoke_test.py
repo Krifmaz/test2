@@ -112,6 +112,17 @@ def check_clone(check):
     hf = clone.detect_hf(HF_ICLASS_SEARCH)
     check(hf and hf.security == "varies", "hf: iCLASS varies")
     check(clone.detect_hf(HF_NONE_SEARCH) is None, "hf: none when no tag")
+    # HF copy plans: which family is copyable, and the dump/restore commands.
+    check(clone.detect_hf(HF_MFC_SEARCH).clone == "mfc", "hf: MFC is copyable")
+    check(clone.detect_hf(HF_DESFIRE_SEARCH).clone == "",
+          "hf: DESFire not copyable")
+    check(clone.hf_dump_cmd("mfc") == "hf mf autopwn", "hf: MFC dump cmd")
+    check(clone.hf_restore_cmd("mfu", "a.json") == "hf mfu restore -f a.json",
+          "hf: MFU restore cmd")
+    check(clone.saved_file("[+] Saved to json file hf-mf-04-dump.json")
+          == "hf-mf-04-dump.json", "hf: json dump filename parsed")
+    check(clone.saved_file("[+] Saved 320 bytes to binary file `d.bin`")
+          == "d.bin", "hf: binary dump filename parsed")
 
 
 def check_easymode(check):
@@ -137,7 +148,14 @@ def check_easymode(check):
     easy.command_finished("hf search", HF_MFC_SEARCH)
     check("MIFARE Classic 1K" in easy.result.text(),
           "easy: HF card identified in result")
-    check(not easy.write_btn.isEnabled(), "easy: HF card is not write-cloned")
+    check(easy.write_btn.isEnabled() and easy._hf_family == "mfc",
+          "easy: HF MIFARE Classic is copyable")
+    check(not easy._clone_cmd, "easy: HF copy sets no LF clone command")
+    # A strong HF card is identified but not copyable.
+    easy._do_read()
+    easy.command_finished("lf search", NOTHING_SEARCH)
+    easy.command_finished("hf search", HF_DESFIRE_SEARCH)
+    check(not easy.write_btn.isEnabled(), "easy: DESFire not copyable")
     # Disconnected: every action is disabled.
     easy.set_connected(False)
     check(not easy.read_btn.isEnabled(), "easy: read disabled when offline")

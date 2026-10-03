@@ -244,58 +244,87 @@ def detect(out: str) -> list:
 # auto-clone them: HF copying needs key recovery and a "magic" card, is
 # card-specific, and a wrong write bricks the tag. Each entry is matched as a
 # substring of `hf search` output; specific chips come before their family.
-HF_INFO = namedtuple("HF_INFO", "label security advice")
+# clone: "" = identify only, "mfc" = MIFARE Classic family (keys + magic card),
+# "mfu" = Ultralight/NTAG family (dump + magic card).
+HF_INFO = namedtuple("HF_INFO", "label security advice clone")
 
 _HF_CHECKS = [
     ("MIFARE DESFire", "strong",
-     "AES/3DES with per-app keys. Not copyable by reading — needs the keys."),
+     "AES/3DES with per-app keys. Not copyable by reading — needs the keys.",
+     ""),
     ("MIFARE Plus",    "strong",
-     "AES in SL3. Not copyable without the keys."),
+     "AES in SL3. Not copyable without the keys.", ""),
     ("MIFARE DUOX",    "strong",
-     "AES/ECC. Not copyable without the keys."),
+     "AES/ECC. Not copyable without the keys.", ""),
     ("MIFARE Hospitality", "strong",
-     "Keyed. Not copyable without the keys."),
+     "Keyed. Not copyable without the keys.", ""),
     ("NTAG",           "none/password",
-     "Usually no crypto (may have a password/PWD). Often copyable to a magic "
-     "NTAG. Read it with `hf mfu dump`."),
+     "Usually no crypto (may have a password). Copyable onto a magic NTAG.",
+     "mfu"),
     ("MIFARE Ultralight", "none/password",
-     "Little or no crypto (UL-C/EV1 may use a password). Often copyable to a "
-     "magic Ultralight. Read it with `hf mfu dump`."),
+     "Little or no crypto (UL-C/EV1 may use a password). Copyable onto a "
+     "magic Ultralight.", "mfu"),
     ("MIFARE Mini",    "weak",
-     "Crypto1 (broken). Recover keys with `hf mf autopwn`, then clone to a "
-     "magic MIFARE card."),
+     "Crypto1 (broken). Keys are recovered, then written to a magic MIFARE "
+     "card.", "mfc"),
     ("MIFARE Classic", "weak",
-     "Crypto1, broken. Recover keys with `hf mf autopwn`, then clone to a "
-     "magic MIFARE card with `hf mf restore`."),
+     "Crypto1, broken. Keys are recovered, then written to a magic MIFARE "
+     "card.", "mfc"),
     ("iCLASS",         "varies",
      "Legacy iCLASS is weak (keys often recoverable); iCLASS SE/SEOS is "
-     "strong. Check with `hf iclass info`."),
+     "strong. Check with `hf iclass info`.", ""),
     ("PicoPass",       "varies",
-     "Check with `hf iclass info`; legacy is weak, SE/SEOS is strong."),
+     "Check with `hf iclass info`; legacy is weak, SE/SEOS is strong.", ""),
     ("ISO 15693",      "varies",
      "Vicinity card (e.g. ICODE). Many have no crypto and are readable; some "
-     "variants add crypto. Try `hf 15 info`."),
+     "variants add crypto. Try `hf 15 info`.", ""),
     ("FeliCa",         "strong",
-     "Used in transit/payment. Not copyable without keys."),
+     "Used in transit/payment. Not copyable without keys.", ""),
     ("LEGIC Prime",    "weak",
-     "Legacy, weak. Potentially copyable — see the `hf legic` commands."),
+     "Legacy, weak. Potentially copyable — see the `hf legic` commands.", ""),
     ("Topaz",          "none",
-     "NFC Type 1, typically open. Read with `hf topaz info`."),
+     "NFC Type 1, typically open. Read with `hf topaz info`.", ""),
     ("ISO 14443-B",    "varies",
      "14443-B family (often passports/banking). Identify further with "
-     "`hf 14b info` before judging."),
+     "`hf 14b info` before judging.", ""),
     ("ISO 14443-A",    "varies",
-     "14443-A, exact chip not pinned down. Try `hf 14a info`."),
+     "14443-A, exact chip not pinned down. Try `hf 14a info`.", ""),
 ]
+
+# Per-family HF copy: read-only dump of the source, then a write from that dump
+# to a magic card. restore accepts the dump file the dump step saves.
+_HF_PLANS = {
+    "mfc": ("hf mf autopwn",  "hf mf restore -f %s"),
+    "mfu": ("hf mfu dump",    "hf mfu restore -f %s"),
+}
 
 
 def detect_hf(out: str):
     """Identify an HF card from `hf search` output as an HF_INFO, or None."""
     out = out or ""
-    for needle, security, advice in _HF_CHECKS:
+    for needle, security, advice, clone_family in _HF_CHECKS:
         if needle in out:
-            return HF_INFO(_hf_label(out, needle), security, advice)
+            return HF_INFO(_hf_label(out, needle), security, advice,
+                           clone_family)
     return None
+
+
+def hf_dump_cmd(family: str) -> str:
+    return _HF_PLANS.get(family, ("", ""))[0]
+
+
+def hf_restore_cmd(family: str, dump_file: str) -> str:
+    tmpl = _HF_PLANS.get(family, ("", ""))[1]
+    return (tmpl % dump_file) if tmpl else ""
+
+
+def saved_file(out: str) -> str:
+    """Path of a dump the client just saved, preferring the JSON dump."""
+    j = re.search(r"Saved to json file\s+(\S+)", out or "")
+    if j:
+        return j.group(1)
+    b = re.search(r"Saved .*? to binary file\s+`([^`]+)`", out or "")
+    return b.group(1) if b else ""
 
 
 def _hf_label(out: str, needle: str) -> str:
